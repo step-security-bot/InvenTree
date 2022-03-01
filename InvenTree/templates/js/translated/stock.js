@@ -25,7 +25,6 @@
     modalSetContent,
     modalSetTitle,
     modalSubmit,
-    moment,
     openModal,
     printStockItemLabels,
     printTestReports,
@@ -1554,11 +1553,11 @@ function locationDetail(row, showLink=true) {
     } else if (row.belongs_to) {
         // StockItem is installed inside a different StockItem
         text = `{% trans "Installed in Stock Item" %} ${row.belongs_to}`;
-        url = `/stock/item/${row.belongs_to}/installed/`;
+        url = `/stock/item/${row.belongs_to}/?display=installed-items`;
     } else if (row.customer) {
         // StockItem has been assigned to a customer
         text = '{% trans "Shipped to customer" %}';
-        url = `/company/${row.customer}/assigned-stock/`;
+        url = `/company/${row.customer}/?display=assigned-stock`;
     } else if (row.sales_order) {
         // StockItem has been assigned to a sales order
         text = '{% trans "Assigned to Sales Order" %}';
@@ -1820,6 +1819,9 @@ function loadStockTable(table, options) {
     col = {
         field: 'stocktake_date',
         title: '{% trans "Stocktake" %}',
+        formatter: function(value) {
+            return renderDate(value);
+        }
     };
 
     if (!options.params.ordering) {
@@ -1833,6 +1835,9 @@ function loadStockTable(table, options) {
         title: '{% trans "Expiry Date" %}',
         visible: global_settings.STOCK_ENABLE_EXPIRY,
         switchable: global_settings.STOCK_ENABLE_EXPIRY,
+        formatter: function(value) {
+            return renderDate(value);
+        }
     };
 
     if (!options.params.ordering) {
@@ -1844,6 +1849,9 @@ function loadStockTable(table, options) {
     col = {
         field: 'updated',
         title: '{% trans "Last Updated" %}',
+        formatter: function(value) {
+            return renderDate(value);
+        }
     };
 
     if (!options.params.ordering) {
@@ -2649,14 +2657,7 @@ function loadStockTrackingTable(table, options) {
         title: '{% trans "Date" %}',
         sortable: true,
         formatter: function(value) {
-            var m = moment(value);
-
-            if (m.isValid()) {
-                var html = m.format('dddd MMMM Do YYYY'); // + '<br>' + m.format('h:mm a');
-                return html;
-            }
-
-            return '<i>{% trans "Invalid date" %}</i>';
+            return renderDate(value, {showTime: true});
         }
     });
 
