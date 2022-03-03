@@ -255,36 +255,4 @@ $('#export-order').click(function() {
     exportOrder('{% url "so-export" order.id %}');
 });
 
-$("#validate-price").click(function() {
-    launchModalForm(
-        "{% url 'so-validate' order.id %}",
-        {
-            reload: true,
-        }
-    );
-});
-
-// reload price display
-function reloadTotal() {
-    {% if order.sell_price %}
-    fetch('{% url 'api-so-detail' order.id %}')
-        .then(function(response) {
-            return response.json();
-        })
-        .then(function(data){
-            html = `{% trans '${data.sell_price_string} (calculated ${data.total_price_string})' %}`;
-            html += `<span class='badge badge-`;
-            if (data.is_valid){
-                html += `success'>`;
-                html += `{% trans "Validated" %}`;
-            } else {
-                html += `danger'>`;
-                html += `{% trans "Not validated" %}`;
-            }
-            $("#sales-order-sell-price").html(html);
-        });
-    {% endif %}
-}
-reloadTotal();
-
 {% endblock %}

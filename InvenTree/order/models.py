@@ -407,6 +407,11 @@ class PurchaseOrder(Order):
         """
         Receive a line item (or partial line item) against this PO
         """
+        Receive a line item (or partial line item) against this PO
+        """
+
+        # Extract optional batch code for the new stock item
+        batch_code = kwargs.get('batch_code', '')
 
         # Extract optional batch code for the new stock item
         batch_code = kwargs.get('batch_code', '')

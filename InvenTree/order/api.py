@@ -1116,12 +1116,6 @@ order_api_urls = [
         url(r'^$', SOLineItemList.as_view(), name='api-so-line-list'),
     ])),
 
-    # API endpoints for sales order line items
-    url(r'^so-add-line/', include([
-        url(r'^(?P<pk>\d+)/$', SOAdditionalLineItemDetail.as_view(), name='api-so-additional-line-detail'),
-        url(r'^$', SOAdditionalLineItemList.as_view(), name='api-so-additional-line-list'),
-    ])),
-
     # API endpoints for sales order allocations
     url(r'^so-allocation/', include([
         url(r'^(?P<pk>\d+)/$', SOAllocationDetail.as_view(), name='api-so-allocation-detail'),

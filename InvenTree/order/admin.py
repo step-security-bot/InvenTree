@@ -181,18 +181,6 @@ class SalesOrderShipmentAdmin(ImportExportModelAdmin):
     autocomplete_fields = ('order',)
 
 
-class SalesOrderAdditionalLineItemAdmin(ImportExportModelAdmin):
-
-    resource_class = SOAdditionalLineItemResource
-
-    list_display = (
-        'order',
-        'title',
-        'quantity',
-        'reference'
-    )
-
-
 class SalesOrderAllocationAdmin(ImportExportModelAdmin):
 
     list_display = (
