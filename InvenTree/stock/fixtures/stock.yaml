@@ -12,6 +12,8 @@
     tree_id: 0
     lft: 0
     rght: 0
+    purchase_price: 123
+    purchase_price_currency: AUD
 
 # 5,000 screws in the bathroom
 - model: stock.stockitem
@@ -107,19 +109,6 @@
     location: 7
     quantity: 5
     batch: "AAA"
-    level: 0
-    tree_id: 0
-    lft: 0
-    rght: 0
-
-- model: stock.stockitem
-  pk: 501
-  fields:
-    part: 10001
-    location: 7
-    batch: "AAA"
-    quantity: 1
-    serial: 1
     level: 0
     tree_id: 0
     lft: 0

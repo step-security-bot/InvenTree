@@ -5,8 +5,13 @@ Unit testing for the Stock API
 # -*- coding: utf-8 -*-
 from __future__ import unicode_literals
 
+import os
+import io
+import tablib
+
 from datetime import datetime, timedelta
 
+import django.http
 from django.urls import reverse
 from rest_framework import status
 
@@ -14,8 +19,9 @@ from InvenTree.status_codes import StockStatus
 from InvenTree.api_tester import InvenTreeAPITestCase
 
 from common.models import InvenTreeSetting
-
-from .models import StockItem, StockLocation
+import company.models
+import part.models
+from stock.models import StockItem, StockLocation
 
 
 class StockAPITestCase(InvenTreeAPITestCase):
@@ -35,6 +41,7 @@ class StockAPITestCase(InvenTreeAPITestCase):
         'stock.add',
         'stock_location.change',
         'stock_location.add',
+        'stock.delete',
     ]
 
     def setUp(self):
@@ -257,6 +264,56 @@ class StockItemListTest(StockAPITestCase):
 
             self.assertEqual(len(response['results']), n)
 
+    def export_data(self, filters=None):
+
+        if not filters:
+            filters = {}
+
+        filters['export'] = 'csv'
+
+        response = self.client.get(self.list_url, data=filters)
+
+        self.assertEqual(response.status_code, 200)
+
+        self.assertTrue(isinstance(response, django.http.response.StreamingHttpResponse))
+
+        file_object = io.StringIO(response.getvalue().decode('utf-8'))
+
+        dataset = tablib.Dataset().load(file_object, 'csv', headers=True)
+
+        return dataset
+
+    def test_export(self):
+        """
+        Test exporting of Stock data via the API
+        """
+
+        dataset = self.export_data({})
+
+        self.assertEqual(len(dataset), 20)
+
+        # Expected headers
+        headers = [
+            'part',
+            'customer',
+            'location',
+            'parent',
+            'quantity',
+            'status',
+        ]
+
+        for h in headers:
+            self.assertIn(h, dataset.headers)
+
+        # Now, add a filter to the results
+        dataset = self.export_data({'location': 1})
+
+        self.assertEqual(len(dataset), 2)
+
+        dataset = self.export_data({'part': 25})
+
+        self.assertEqual(len(dataset), 8)
+
 
 class StockItemTest(StockAPITestCase):
     """
@@ -264,9 +321,6 @@ class StockItemTest(StockAPITestCase):
     """
 
     list_url = reverse('api-stock-list')
-
-    def detail_url(self, pk):
-        return reverse('api-stock-detail', kwargs={'pk': pk})
 
     def setUp(self):
         super().setUp()
@@ -338,7 +392,7 @@ class StockItemTest(StockAPITestCase):
             }
         )
 
-        self.assertContains(response, 'This field is required', status_code=status.HTTP_400_BAD_REQUEST)
+        self.assertContains(response, 'Valid part must be supplied', status_code=status.HTTP_400_BAD_REQUEST)
 
         # POST with an invalid part reference
 
@@ -351,7 +405,7 @@ class StockItemTest(StockAPITestCase):
             }
         )
 
-        self.assertContains(response, 'does not exist', status_code=status.HTTP_400_BAD_REQUEST)
+        self.assertContains(response, 'Valid part must be supplied', status_code=status.HTTP_400_BAD_REQUEST)
 
         # POST without quantity
         response = self.post(
@@ -360,23 +414,82 @@ class StockItemTest(StockAPITestCase):
                 'part': 1,
                 'location': 1,
             },
-            expected_code=201,
+            expected_code=400
         )
 
-        # Item should have been created with default quantity
-        self.assertEqual(response.data['quantity'], 1)
-        
+        self.assertIn('Quantity is required', str(response.data))
+
         # POST with quantity and part and location
-        response = self.client.post(
+        response = self.post(
             self.list_url,
             data={
                 'part': 1,
                 'location': 1,
                 'quantity': 10,
-            }
+            },
+            expected_code=201
         )
 
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+    def test_creation_with_serials(self):
+        """
+        Test that serialized stock items can be created via the API,
+        """
+
+        trackable_part = part.models.Part.objects.create(
+            name='My part',
+            description='A trackable part',
+            trackable=True,
+            default_location=StockLocation.objects.get(pk=1),
+        )
+
+        self.assertEqual(trackable_part.stock_entries().count(), 0)
+        self.assertEqual(trackable_part.get_stock_count(), 0)
+
+        # This should fail, incorrect serial number count
+        self.post(
+            self.list_url,
+            data={
+                'part': trackable_part.pk,
+                'quantity': 10,
+                'serial_numbers': '1-20',
+            },
+            expected_code=400,
+        )
+
+        response = self.post(
+            self.list_url,
+            data={
+                'part': trackable_part.pk,
+                'quantity': 10,
+                'serial_numbers': '1-10',
+            },
+            expected_code=201,
+        )
+
+        data = response.data
+
+        self.assertEqual(data['quantity'], 10)
+        sn = data['serial_numbers']
+
+        # Check that each serial number was created
+        for i in range(1, 11):
+            self.assertTrue(i in sn)
+
+            # Check the unique stock item has been created
+
+            item = StockItem.objects.get(
+                part=trackable_part,
+                serial=str(i),
+            )
+
+            # Item location should have been set automatically
+            self.assertIsNotNone(item.location)
+
+            self.assertEqual(str(i), item.serial)
+
+        # There now should be 10 unique stock entries for this part
+        self.assertEqual(trackable_part.stock_entries().count(), 10)
+        self.assertEqual(trackable_part.get_stock_count(), 10)
 
     def test_default_expiry(self):
         """
@@ -428,6 +541,67 @@ class StockItemTest(StockAPITestCase):
 
         self.assertEqual(response.data['expiry_date'], expiry.isoformat())
 
+    def test_purchase_price(self):
+        """
+        Test that we can correctly read and adjust purchase price information via the API
+        """
+
+        url = reverse('api-stock-detail', kwargs={'pk': 1})
+
+        data = self.get(url, expected_code=200).data
+
+        # Check fixture values
+        self.assertEqual(data['purchase_price'], '123.0000')
+        self.assertEqual(data['purchase_price_currency'], 'AUD')
+        self.assertEqual(data['purchase_price_string'], 'A$123.0000')
+
+        # Update just the amount
+        data = self.patch(
+            url,
+            {
+                'purchase_price': 456
+            },
+            expected_code=200
+        ).data
+
+        self.assertEqual(data['purchase_price'], '456.0000')
+        self.assertEqual(data['purchase_price_currency'], 'AUD')
+
+        # Update the currency
+        data = self.patch(
+            url,
+            {
+                'purchase_price_currency': 'NZD',
+            },
+            expected_code=200
+        ).data
+
+        self.assertEqual(data['purchase_price_currency'], 'NZD')
+
+        # Clear the price field
+        data = self.patch(
+            url,
+            {
+                'purchase_price': None,
+            },
+            expected_code=200
+        ).data
+
+        self.assertEqual(data['purchase_price'], None)
+        self.assertEqual(data['purchase_price_string'], '-')
+
+        # Invalid currency code
+        data = self.patch(
+            url,
+            {
+                'purchase_price_currency': 'xyz',
+            },
+            expected_code=400
+        )
+
+        data = self.get(url).data
+        self.assertEqual(data['purchase_price_currency'], 'NZD')
+
 
 class StocktakeTest(StockAPITestCase):
     """
@@ -448,31 +622,34 @@ class StocktakeTest(StockAPITestCase):
 
             # POST with a valid action
             response = self.post(url, data)
-            self.assertContains(response, "must contain list", status_code=status.HTTP_400_BAD_REQUEST)
+
+            self.assertIn("This field is required", str(response.data["items"]))
 
             data['items'] = [{
                 'no': 'aa'
             }]
 
             # POST without a PK
-            response = self.post(url, data)
-            self.assertContains(response, 'must contain a valid integer primary-key', status_code=status.HTTP_400_BAD_REQUEST)
+            response = self.post(url, data, expected_code=400)
+
+            self.assertIn('This field is required', str(response.data))
 
             # POST with an invalid PK
             data['items'] = [{
                 'pk': 10
             }]
 
-            response = self.post(url, data)
-            self.assertContains(response, 'does not match valid stock item', status_code=status.HTTP_400_BAD_REQUEST)
+            response = self.post(url, data, expected_code=400)
+
+            self.assertContains(response, 'object does not exist', status_code=status.HTTP_400_BAD_REQUEST)
 
             # POST with missing quantity value
             data['items'] = [{
                 'pk': 1234
             }]
 
-            response = self.post(url, data)
-            self.assertContains(response, 'Invalid quantity value', status_code=status.HTTP_400_BAD_REQUEST)
+            response = self.post(url, data, expected_code=400)
+            self.assertContains(response, 'This field is required', status_code=status.HTTP_400_BAD_REQUEST)
 
             # POST with an invalid quantity value
             data['items'] = [{
@@ -481,7 +658,7 @@ class StocktakeTest(StockAPITestCase):
             }]
 
             response = self.post(url, data)
-            self.assertContains(response, 'Invalid quantity value', status_code=status.HTTP_400_BAD_REQUEST)
+            self.assertContains(response, 'A valid number is required', status_code=status.HTTP_400_BAD_REQUEST)
 
             data['items'] = [{
                 'pk': 1234,
@@ -489,18 +666,7 @@ class StocktakeTest(StockAPITestCase):
             }]
 
             response = self.post(url, data)
-            self.assertContains(response, 'must not be less than zero', status_code=status.HTTP_400_BAD_REQUEST)
-
-            # Test with a single item
-            data = {
-                'item': {
-                    'pk': 1234,
-                    'quantity': '10',
-                }
-            }
-
-            response = self.post(url, data)
-            self.assertEqual(response.status_code, status.HTTP_200_OK)
+            self.assertContains(response, 'Ensure this value is greater than or equal to 0', status_code=status.HTTP_400_BAD_REQUEST)
 
     def test_transfer(self):
         """
@@ -508,24 +674,63 @@ class StocktakeTest(StockAPITestCase):
         """
 
         data = {
-            'item': {
-                'pk': 1234,
-                'quantity': 10,
-            },
+            'items': [
+                {
+                    'pk': 1234,
+                    'quantity': 10,
+                }
+            ],
             'location': 1,
             'notes': "Moving to a new location"
         }
 
         url = reverse('api-stock-transfer')
 
-        response = self.post(url, data)
-        self.assertContains(response, "Moved 1 parts to", status_code=status.HTTP_200_OK)
+        # This should succeed
+        response = self.post(url, data, expected_code=201)
 
         # Now try one which will fail due to a bad location
         data['location'] = 'not a location'
 
-        response = self.post(url, data)
-        self.assertContains(response, 'Valid location must be specified', status_code=status.HTTP_400_BAD_REQUEST)
+        response = self.post(url, data, expected_code=400)
+
+        self.assertContains(response, 'Incorrect type. Expected pk value', status_code=status.HTTP_400_BAD_REQUEST)
+
+
+class StockItemDeletionTest(StockAPITestCase):
+    """
+    Tests for stock item deletion via the API
+    """
+
+    def test_delete(self):
+
+        n = StockItem.objects.count()
+
+        # Create and then delete a bunch of stock items
+        for idx in range(10):
+
+            # Create new StockItem via the API
+            response = self.post(
+                reverse('api-stock-list'),
+                {
+                    'part': 1,
+                    'location': 1,
+                    'quantity': idx,
+                },
+                expected_code=201
+            )
+
+            pk = response.data['pk']
+
+            self.assertEqual(StockItem.objects.count(), n + 1)
+
+            # Request deletion via the API
+            self.delete(
+                reverse('api-stock-detail', kwargs={'pk': pk}),
+                expected_code=204
+            )
+
+        self.assertEqual(StockItem.objects.count(), n)
 
 
 class StockTestResultTest(StockAPITestCase):
@@ -605,3 +810,332 @@ class StockTestResultTest(StockAPITestCase):
         test = response.data[0]
         self.assertEqual(test['value'], '150kPa')
         self.assertEqual(test['user'], self.user.pk)
+
+    def test_post_bitmap(self):
+        """
+        2021-08-25
+
+        For some (unknown) reason, prior to fix https://github.com/inventree/InvenTree/pull/2018
+        uploading a bitmap image would result in a failure.
+
+        This test has been added to ensure that there is no regression.
+
+        As a bonus this also tests the file-upload component
+        """
+
+        here = os.path.dirname(__file__)
+
+        image_file = os.path.join(here, 'fixtures', 'test_image.bmp')
+
+        with open(image_file, 'rb') as bitmap:
+
+            data = {
+                'stock_item': 105,
+                'test': 'Checked Steam Valve',
+                'result': False,
+                'value': '150kPa',
+                'notes': 'I guess there was just too much pressure?',
+                "attachment": bitmap,
+            }
+
+            response = self.client.post(self.get_url(), data)
+
+            self.assertEqual(response.status_code, 201)
+
+            # Check that an attachment has been uploaded
+            self.assertIsNotNone(response.data['attachment'])
+
+
+class StockAssignTest(StockAPITestCase):
+    """
+    Unit tests for the stock assignment API endpoint,
+    where stock items are manually assigned to a customer
+    """
+
+    URL = reverse('api-stock-assign')
+
+    def test_invalid(self):
+
+        # Test with empty data
+        response = self.post(
+            self.URL,
+            data={},
+            expected_code=400,
+        )
+
+        self.assertIn('This field is required', str(response.data['items']))
+        self.assertIn('This field is required', str(response.data['customer']))
+
+        # Test with an invalid customer
+        response = self.post(
+            self.URL,
+            data={
+                'customer': 999,
+            },
+            expected_code=400,
+        )
+
+        self.assertIn('object does not exist', str(response.data['customer']))
+
+        # Test with a company which is *not* a customer
+        response = self.post(
+            self.URL,
+            data={
+                'customer': 3,
+            },
+            expected_code=400,
+        )
+
+        self.assertIn('company is not a customer', str(response.data['customer']))
+
+        # Test with an empty items list
+        response = self.post(
+            self.URL,
+            data={
+                'items': [],
+                'customer': 4,
+            },
+            expected_code=400,
+        )
+
+        self.assertIn('A list of stock items must be provided', str(response.data))
+
+        stock_item = StockItem.objects.create(
+            part=part.models.Part.objects.get(pk=1),
+            status=StockStatus.DESTROYED,
+            quantity=5,
+        )
+
+        response = self.post(
+            self.URL,
+            data={
+                'items': [
+                    {
+                        'item': stock_item.pk,
+                    },
+                ],
+                'customer': 4,
+            },
+            expected_code=400,
+        )
+
+        self.assertIn('Item must be in stock', str(response.data['items'][0]))
+
+    def test_valid(self):
+
+        stock_items = []
+
+        for i in range(5):
+
+            stock_item = StockItem.objects.create(
+                part=part.models.Part.objects.get(pk=25),
+                quantity=i + 5,
+            )
+
+            stock_items.append({
+                'item': stock_item.pk
+            })
+
+        customer = company.models.Company.objects.get(pk=4)
+
+        self.assertEqual(customer.assigned_stock.count(), 0)
+
+        response = self.post(
+            self.URL,
+            data={
+                'items': stock_items,
+                'customer': 4,
+            },
+            expected_code=201,
+        )
+
+        self.assertEqual(response.data['customer'], 4)
+
+        # 5 stock items should now have been assigned to this customer
+        self.assertEqual(customer.assigned_stock.count(), 5)
+
+
+class StockMergeTest(StockAPITestCase):
+    """
+    Unit tests for merging stock items via the API
+    """
+
+    URL = reverse('api-stock-merge')
+
+    def setUp(self):
+
+        super().setUp()
+
+        self.part = part.models.Part.objects.get(pk=25)
+        self.loc = StockLocation.objects.get(pk=1)
+        self.sp_1 = company.models.SupplierPart.objects.get(pk=100)
+        self.sp_2 = company.models.SupplierPart.objects.get(pk=101)
+
+        self.item_1 = StockItem.objects.create(
+            part=self.part,
+            supplier_part=self.sp_1,
+            quantity=100,
+        )
+
+        self.item_2 = StockItem.objects.create(
+            part=self.part,
+            supplier_part=self.sp_2,
+            quantity=100,
+        )
+
+        self.item_3 = StockItem.objects.create(
+            part=self.part,
+            supplier_part=self.sp_2,
+            quantity=50,
+        )
+
+    def test_missing_data(self):
+        """
+        Test responses which are missing required data
+        """
+
+        # Post completely empty
+
+        data = self.post(
+            self.URL,
+            {},
+            expected_code=400
+        ).data
+
+        self.assertIn('This field is required', str(data['items']))
+        self.assertIn('This field is required', str(data['location']))
+
+        # Post with a location and empty items list
+        data = self.post(
+            self.URL,
+            {
+                'items': [],
+                'location': 1,
+            },
+            expected_code=400
+        ).data
+
+        self.assertIn('At least two stock items', str(data))
+
+    def test_invalid_data(self):
+        """
+        Test responses which have invalid data
+        """
+
+        # Serialized stock items should be rejected
+        data = self.post(
+            self.URL,
+            {
+                'items': [
+                    {
+                        'item': 501,
+                    },
+                    {
+                        'item': 502,
+                    }
+                ],
+                'location': 1,
+            },
+            expected_code=400,
+        ).data
+
+        self.assertIn('Serialized stock cannot be merged', str(data))
+
+        # Prevent item duplication
+
+        data = self.post(
+            self.URL,
+            {
+                'items': [
+                    {
+                        'item': 11,
+                    },
+                    {
+                        'item': 11,
+                    }
+                ],
+                'location': 1,
+            },
+            expected_code=400,
+        ).data
+
+        self.assertIn('Duplicate stock items', str(data))
+
+        # Check for mismatching stock items
+        data = self.post(
+            self.URL,
+            {
+                'items': [
+                    {
+                        'item': 1234,
+                    },
+                    {
+                        'item': 11,
+                    }
+                ],
+                'location': 1,
+            },
+            expected_code=400,
+        ).data
+
+        self.assertIn('Stock items must refer to the same part', str(data))
+
+        # Check for mismatching supplier parts
+        payload = {
+            'items': [
+                {
+                    'item': self.item_1.pk,
+                },
+                {
+                    'item': self.item_2.pk,
+                },
+            ],
+            'location': 1,
+        }
+
+        data = self.post(
+            self.URL,
+            payload,
+            expected_code=400,
+        ).data
+
+        self.assertIn('Stock items must refer to the same supplier part', str(data))
+
+    def test_valid_merge(self):
+        """
+        Test valid merging of stock items
+        """
+
+        # Check initial conditions
+        n = StockItem.objects.filter(part=self.part).count()
+        self.assertEqual(self.item_1.quantity, 100)
+
+        payload = {
+            'items': [
+                {
+                    'item': self.item_1.pk,
+                },
+                {
+                    'item': self.item_2.pk,
+                },
+                {
+                    'item': self.item_3.pk,
+                },
+            ],
+            'location': 1,
+            'allow_mismatched_suppliers': True,
+        }
+
+        self.post(
+            self.URL,
+            payload,
+            expected_code=201,
+        )
+
+        self.item_1.refresh_from_db()
+
+        # Stock quantity should have been increased!
+        self.assertEqual(self.item_1.quantity, 250)
+
+        # Total number of stock items has been reduced!
+        self.assertEqual(StockItem.objects.filter(part=self.part).count(), n - 2)

@@ -8,36 +8,105 @@ import re
 
 import common.models
 
-INVENTREE_SW_VERSION = "0.5.0 pre"
+# InvenTree software version
+INVENTREE_SW_VERSION = "0.7.0 dev"
 
-INVENTREE_API_VERSION = 9
+# InvenTree API version
+INVENTREE_API_VERSION = 27
 
 """
 Increment this API version number whenever there is a significant change to the API that any clients need to know about
 
-v9 -> 2021-08-09
+v27 -> 2022-02-28
+    - Adds target_date field to individual line items for purchase orders and sales orders
+
+v26 -> 2022-02-17
+    - Adds API endpoint for uploading a BOM file and extracting data
+
+v25 -> 2022-02-17
+    - Adds ability to filter "part" list endpoint by "in_bom_for" argument
+
+v24 -> 2022-02-10
+    - Adds API endpoint for deleting (cancelling) build order outputs
+
+v23 -> 2022-02-02
+    - Adds API endpoints for managing plugin classes
+    - Adds API endpoints for managing plugin settings
+
+v22 -> 2021-12-20
+    - Adds API endpoint to "merge" multiple stock items
+
+v21 -> 2021-12-04
+    - Adds support for multiple "Shipments" against a SalesOrder
+    - Refactors process for stock allocation against a SalesOrder
+
+v20 -> 2021-12-03
+    - Adds ability to filter POLineItem endpoint by "base_part"
+    - Adds optional "order_detail" to POLineItem list endpoint
+
+v19 -> 2021-12-02
+    - Adds the ability to filter the StockItem API by "part_tree"
+    - Returns only stock items which match a particular part.tree_id field
+
+v18 -> 2021-11-15
+    - Adds the ability to filter BomItem API by "uses" field
+    - This returns a list of all BomItems which "use" the specified part
+    - Includes inherited BomItem objects
+
+v17 -> 2021-11-09
+    - Adds API endpoints for GLOBAL and USER settings objects
+    - Ref: https://github.com/inventree/InvenTree/pull/2275
+
+v16 -> 2021-10-17
+    - Adds API endpoint for completing build order outputs
+
+v15 -> 2021-10-06
+    - Adds detail endpoint for SalesOrderAllocation model
+    - Allows use of the API forms interface for adjusting SalesOrderAllocation objects
+
+v14 -> 2021-10-05
+    - Stock adjustment actions API is improved, using native DRF serializer support
+    - However adjustment actions now only support 'pk' as a lookup field
+
+v13 -> 2021-10-05
+    - Adds API endpoint to allocate stock items against a BuildOrder
+    - Updates StockItem API with improved filtering against BomItem data
+
+v12 -> 2021-09-07
+    - Adds API endpoint to receive stock items against a PurchaseOrder
+
+v11 -> 2021-08-26
+    - Adds "units" field to PartBriefSerializer
+    - This allows units to be introspected from the "part_detail" field in the StockItem serializer
+
+v10 -> 2021-08-23
+    - Adds "purchase_price_currency" to StockItem serializer
+    - Adds "purchase_price_string" to StockItem serializer
+    - Purchase price is now writable for StockItem serializer
+
+v9  -> 2021-08-09
     - Adds "price_string" to part pricing serializers
 
-v8 -> 2021-07-19
+v8  -> 2021-07-19
     - Refactors the API interface for SupplierPart and ManufacturerPart models
     - ManufacturerPart objects can no longer be created via the SupplierPart API endpoint
 
-v7 -> 2021-07-03
+v7  -> 2021-07-03
     - Introduced the concept of "API forms" in https://github.com/inventree/InvenTree/pull/1716
     - API OPTIONS endpoints provide comprehensive field metedata
     - Multiple new API endpoints added for database models
 
-v6 -> 2021-06-23
+v6  -> 2021-06-23
     - Part and Company images can now be directly uploaded via the REST API
 
-v5 -> 2021-06-21
+v5  -> 2021-06-21
     - Adds API interface for manufacturer part parameters
 
-v4 -> 2021-06-01
+v4  -> 2021-06-01
     - BOM items can now accept "variant stock" to be assigned against them
     - Many slight API tweaks were needed to get this to work properly!
 
-v3 -> 2021-05-22:
+v3  -> 2021-05-22:
     - The updated StockItem "history tracking" now uses a different interface
 
 """
@@ -58,7 +127,7 @@ def inventreeInstanceTitle():
 
 def inventreeVersion():
     """ Returns the InvenTree version string """
-    return INVENTREE_SW_VERSION
+    return INVENTREE_SW_VERSION.lower().strip()
 
 
 def inventreeVersionTuple(version=None):
@@ -70,6 +139,28 @@ def inventreeVersionTuple(version=None):
     match = re.match(r"^.*(\d+)\.(\d+)\.(\d+).*$", str(version))
 
     return [int(g) for g in match.groups()]
+
+
+def isInvenTreeDevelopmentVersion():
+    """
+    Return True if current InvenTree version is a "development" version
+    """
+    return inventreeVersion().endswith('dev')
+
+
+def inventreeDocsVersion():
+    """
+    Return the version string matching the latest documentation.
+
+    Development -> "latest"
+    Release -> "major.minor.sub" e.g. "0.5.2"
+
+    """
+
+    if isInvenTreeDevelopmentVersion():
+        return "latest"
+    else:
+        return INVENTREE_SW_VERSION
 
 
 def isInvenTreeUpToDate():

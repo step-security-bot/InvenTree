@@ -49,6 +49,7 @@ static_i18n
 
 # Local config file
 config.yaml
+plugins.txt
 
 # Default data file
 data.json
@@ -67,8 +68,20 @@ secret_key.txt
 .coverage
 htmlcov/
 
+# Temporary javascript files (used for testing)
+js_tmp/
+
 # Development files
 dev/
 
 # Locale stats file
 locale_stats.json
+
+# node.js
+node_modules/
+
+# maintenance locker
+maintenance_mode_state.txt
+
+# plugin dev directory
+plugins/

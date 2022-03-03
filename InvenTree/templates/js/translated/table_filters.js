@@ -8,13 +8,26 @@
 {% include "status_codes.html" with label='purchaseOrder' options=PurchaseOrderStatus.list %}
 {% include "status_codes.html" with label='salesOrder' options=SalesOrderStatus.list %}
 
+/* globals
+    global_settings
+*/
+
+/* exported
+    buildStatusDisplay,
+    getAvailableTableFilters,
+    purchaseOrderStatusDisplay,
+    salesOrderStatusDisplay,
+    stockHistoryStatusDisplay,
+    stockStatusDisplay,
+*/
+
 
 function getAvailableTableFilters(tableKey) {
 
     tableKey = tableKey.toLowerCase();
 
     // Filters for "variant" table
-    if (tableKey == "variants") {
+    if (tableKey == 'variants') {
         return {
             active: {
                 type: 'bool',
@@ -36,11 +49,11 @@ function getAvailableTableFilters(tableKey) {
     }
 
     // Filters for Bill of Materials table
-    if (tableKey == "bom") {
+    if (tableKey == 'bom') {
         return {
             sub_part_trackable: {
                 type: 'bool',
-                title: '{% trans "Trackable Part" %}'
+                title: '{% trans "Trackable Part" %}',
             },
             sub_part_assembly: {
                 type: 'bool',
@@ -57,44 +70,66 @@ function getAvailableTableFilters(tableKey) {
             allow_variants: {
                 type: 'bool',
                 title: '{% trans "Allow Variant Stock" %}',
-            }
+            },
+        };
+    }
+
+    // Filters for the "related parts" table
+    if (tableKey == 'related') {
+        return {
         };
     }
 
     // Filters for the "used in" table
     if (tableKey == 'usedin') {
         return {
+            'inherited': {
+                type: 'bool',
+                title: '{% trans "Inherited" %}',
+            },
+            'optional': {
+                type: 'bool',
+                title: '{% trans "Optional" %}',
+            },
             'part_active': {
                 type: 'bool',
                 title: '{% trans "Active" %}',
+            },
+            'part_trackable': {
+                type: 'bool',
+                title: '{% trans "Trackable" %}',
             },
         };
     }
 
     // Filters for "stock location" table
-    if (tableKey == "location") {
+    if (tableKey == 'location') {
         return {
             cascade: {
                 type: 'bool',
                 title: '{% trans "Include sublocations" %}',
                 description: '{% trans "Include locations" %}',
-            }
+            },
         };
     }
 
     // Filters for "part category" table
-    if (tableKey == "category") {
+    if (tableKey == 'category') {
         return {
             cascade: {
                 type: 'bool',
                 title: '{% trans "Include subcategories" %}',
                 description: '{% trans "Include subcategories" %}',
-            }
+            },
+            starred: {
+                type: 'bool',
+                title: '{% trans "Subscribed" %}',
+            },
         };
     }
 
     // Filters for the "customer stock" table (really a subset of "stock")
-    if (tableKey == "customerstock") {
+    if (tableKey == 'customerstock') {
         return {
             serialized: {
                 type: 'bool',
@@ -102,7 +137,7 @@ function getAvailableTableFilters(tableKey) {
             },
             serial_gte: {
                 title: '{% trans "Serial number GTE" %}',
-                description: '{% trans "Serial number greater than or equal to" %}'
+                description: '{% trans "Serial number greater than or equal to" %}',
             },
             serial_lte: {
                 title: '{% trans "Serial number LTE" %}',
@@ -110,7 +145,7 @@ function getAvailableTableFilters(tableKey) {
             },
             serial: {
                 title: '{% trans "Serial number" %}',
-                description: '{% trans "Serial number" %}'
+                description: '{% trans "Serial number" %}',
             },
             batch: {
                 title: '{% trans "Batch" %}',
@@ -137,6 +172,11 @@ function getAvailableTableFilters(tableKey) {
                 type: 'bool',
                 title: '{% trans "Is allocated" %}',
                 description: '{% trans "Item has been allocated" %}',
+            },
+            available: {
+                type: 'bool',
+                title: '{% trans "Available" %}',
+                description: '{% trans "Stock is available for use" %}',
             },
             cascade: {
                 type: 'bool',
@@ -179,11 +219,11 @@ function getAvailableTableFilters(tableKey) {
             },
             serial: {
                 title: '{% trans "Serial number" %}',
-                description: '{% trans "Serial number" %}'
+                description: '{% trans "Serial number" %}',
             },
             serial_gte: {
                 title: '{% trans "Serial number GTE" %}',
-                description: '{% trans "Serial number greater than or equal to" %}'
+                description: '{% trans "Serial number greater than or equal to" %}',
             },
             serial_lte: {
                 title: '{% trans "Serial number LTE" %}',
@@ -225,12 +265,7 @@ function getAvailableTableFilters(tableKey) {
 
     // Filters for the 'stock test' table
     if (tableKey == 'stocktests') {
-        return {
-            result: {
-                type: 'bool',
-                title: '{% trans "Test result" %}',
-            },
-        };
+        return {};
     }
 
     // Filters for the 'part test template' table
@@ -239,7 +274,7 @@ function getAvailableTableFilters(tableKey) {
             required: {
                 type: 'bool',
                 title: '{% trans "Required" %}',
-            }
+            },
         };
     }
 
@@ -258,11 +293,33 @@ function getAvailableTableFilters(tableKey) {
                 type: 'bool',
                 title: '{% trans "Overdue" %}',
             },
+            assigned_to_me: {
+                type: 'bool',
+                title: '{% trans "Assigned to me" %}',
+            },
         };
     }
 
-    // Filters for the "Order" table
-    if (tableKey == "purchaseorder") {
+    // Filters for PurchaseOrderLineItem table
+    if (tableKey == 'purchaseorderlineitem') {
+        return {
+            pending: {
+                type: 'bool',
+                title: '{% trans "Pending" %}',
+            },
+            received: {
+                type: 'bool',
+                title: '{% trans "Received" %}',
+            },
+            order_status: {
+                title: '{% trans "Order status" %}',
+                options: purchaseOrderCodes,
+            },
+        };
+    }
+
+    // Filters for the PurchaseOrder table
+    if (tableKey == 'purchaseorder') {
 
         return {
             status: {
@@ -277,10 +334,14 @@ function getAvailableTableFilters(tableKey) {
                 type: 'bool',
                 title: '{% trans "Overdue" %}',
             },
+            assigned_to_me: {
+                type: 'bool',
+                title: '{% trans "Assigned to me" %}',
+            },
         };
     }
 
-    if (tableKey == "salesorder") {
+    if (tableKey == 'salesorder') {
         return {
             status: {
                 title: '{% trans "Order status" %}',
@@ -297,17 +358,44 @@ function getAvailableTableFilters(tableKey) {
         };
     }
 
+    if (tableKey == 'salesorderlineitem') {
+        return {
+            completed: {
+                type: 'bool',
+                title: '{% trans "Completed" %}',
+            },
+        };
+    }
+
     if (tableKey == 'supplier-part') {
         return {
             active: {
                 type: 'bool',
                 title: '{% trans "Active parts" %}',
-            }
+            },
+        };
+    }
+
+    // Filters for "company" table
+    if (tableKey == 'company') {
+        return {
+            is_manufacturer: {
+                type: 'bool',
+                title: '{% trans "Manufacturer" %}',
+            },
+            is_supplier: {
+                type: 'bool',
+                title: '{% trans "Supplier" %}',
+            },
+            is_customer: {
+                type: 'bool',
+                title: '{% trans "Customer" %}',
+            },
         };
     }
 
     // Filters for the "Parts" table
-    if (tableKey == "parts") {
+    if (tableKey == 'parts') {
         return {
             cascade: {
                 type: 'bool',
@@ -330,7 +418,7 @@ function getAvailableTableFilters(tableKey) {
             },
             has_stock: {
                 type: 'bool',
-                title: '{% trans "Stock available" %}'
+                title: '{% trans "Stock available" %}',
             },
             low_stock: {
                 type: 'bool',
@@ -346,7 +434,7 @@ function getAvailableTableFilters(tableKey) {
             },
             starred: {
                 type: 'bool',
-                title: '{% trans "Starred" %}',
+                title: '{% trans "Subscribed" %}',
             },
             salable: {
                 type: 'bool',

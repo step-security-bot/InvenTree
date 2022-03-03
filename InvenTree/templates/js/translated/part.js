@@ -1,20 +1,53 @@
 {% load i18n %}
 {% load inventree_extras %}
 
+/* globals
+    Chart,
+    constructForm,
+    global_settings,
+    imageHoverIcon,
+    inventreeGet,
+    inventreePut,
+    launchModalForm,
+    linkButtonsToSelection,
+    loadTableFilters,
+    makeIconBadge,
+    makeIconButton,
+    printPartLabels,
+    renderLink,
+    setFormGroupVisibility,
+    setupFilterList,
+    yesNoLabel,
+*/
+
+/* exported
+    duplicateBom,
+    duplicatePart,
+    editCategory,
+    editPart,
+    initPriceBreakSet,
+    loadBomChart,
+    loadParametricPartTable,
+    loadPartCategoryTable,
+    loadPartParameterTable,
+    loadPartPurchaseOrderTable,
+    loadPartTable,
+    loadPartTestTemplateTable,
+    loadPartVariantTable,
+    loadRelatedPartsTable,
+    loadSellPricingChart,
+    loadSimplePartTable,
+    loadStockPricingChart,
+    partStockLabel,
+    toggleStar,
+    validateBom,
+*/
+
 /* Part API functions
  * Requires api.js to be loaded first
  */
 
-function yesNoLabel(value) {
-    if (value) {
-        return `<span class='label label-green'>{% trans "YES" %}</span>`;
-    } else {
-        return `<span class='label label-yellow'>{% trans "NO" %}</span>`;
-    }
-}
-
-
-function partGroups(options={}) {
+function partGroups() {
 
     return {
         attributes: {
@@ -34,9 +67,9 @@ function partGroups(options={}) {
             collapsible: true,
             hidden: !global_settings.PART_PURCHASEABLE,
         }
-    }
-
+    };
 }
+
 
 // Construct fieldset for part forms
 function partFields(options={}) {
@@ -45,7 +78,7 @@ function partFields(options={}) {
         category: {
             secondary: {
                 title: '{% trans "Add Part Category" %}',
-                fields: function(data) {
+                fields: function() {
                     var fields = categoryFields();
 
                     return fields;
@@ -66,7 +99,12 @@ function partFields(options={}) {
         },
         default_location: {
         },
-        default_supplier: {},
+        default_supplier: {
+            filters: {
+                part_detail: true,
+                supplier_detail: true,
+            }
+        },
         default_expiry: {
             icon: 'fa-calendar-alt',
         },
@@ -74,34 +112,34 @@ function partFields(options={}) {
             icon: 'fa-boxes',
         },
         component: {
-            value: global_settings.PART_COMPONENT,
+            default: global_settings.PART_COMPONENT,
             group: 'attributes',
         },
         assembly: {
-            value: global_settings.PART_ASSEMBLY,
+            default: global_settings.PART_ASSEMBLY,
             group: 'attributes',
         },
         is_template: {
-            value: global_settings.PART_TEMPLATE,
+            default: global_settings.PART_TEMPLATE,
             group: 'attributes',
         },
         trackable: {
-            value: global_settings.PART_TRACKABLE,
+            default: global_settings.PART_TRACKABLE,
             group: 'attributes',
         },
         purchaseable: {
-            value: global_settings.PART_PURCHASEABLE,
+            default: global_settings.PART_PURCHASEABLE,
             group: 'attributes',
             onEdit: function(value, name, field, options) {
                 setFormGroupVisibility('supplier', value, options);
             }
         },
         salable: {
-            value: global_settings.PART_SALABLE,
+            default: global_settings.PART_SALABLE,
             group: 'attributes',
         },
         virtual: {
-            value: global_settings.PART_VIRTUAL,
+            default: global_settings.PART_VIRTUAL,
             group: 'attributes',
         },
     };
@@ -115,15 +153,10 @@ function partFields(options={}) {
 
     // Pop expiry field
     if (!global_settings.STOCK_ENABLE_EXPIRY) {
-        delete fields["default_expiry"];
+        delete fields['default_expiry'];
     }
 
-    // Additional fields when "creating" a new part
-    if (options.create) {
-
-        // No supplier parts available yet
-        delete fields["default_supplier"];
-
+    if (options.create || options.duplicate) {
         if (global_settings.PART_CREATE_INITIAL) {
 
             fields.initial_stock = {
@@ -152,6 +185,13 @@ function partFields(options={}) {
                 group: 'create',
             };
         }
+    }
+
+    // Additional fields when "creating" a new part
+    if (options.create) {
+
+        // No supplier parts available yet
+        delete fields['default_supplier'];
 
         fields.copy_category_parameters = {
             type: 'boolean',
@@ -264,7 +304,7 @@ function categoryFields() {
 
 
 // Edit a PartCategory via the API
-function editCategory(pk, options={}) {
+function editCategory(pk) {
 
     var url = `/api/part/category/${pk}/`;
 
@@ -279,7 +319,7 @@ function editCategory(pk, options={}) {
 }
 
 
-function editPart(pk, options={}) {
+function editPart(pk) {
 
     var url = `/api/part/${pk}/`;
 
@@ -287,19 +327,29 @@ function editPart(pk, options={}) {
         edit: true
     });
 
+    // Filter supplied parts by the Part ID
+    fields.default_supplier.filters.part = pk;
+
     var groups = partGroups({});
 
     constructForm(url, {
         fields: fields,
-        groups: partGroups(),
+        groups: groups,
         title: '{% trans "Edit Part" %}',
         reload: true,
+        successMessage: '{% trans "Part edited" %}',
     });
 }
 
 
 // Launch form to duplicate a part
 function duplicatePart(pk, options={}) {
+
+    var title = '{% trans "Duplicate Part" %}';
+
+    if (options.variant) {
+        title = '{% trans "Create Part Variant" %}';
+    }
 
     // First we need all the part information
     inventreeGet(`/api/part/${pk}/`, {}, {
@@ -309,6 +359,13 @@ function duplicatePart(pk, options={}) {
             var fields = partFields({
                 duplicate: pk,
             });
+
+            if (fields.initial_stock_location) {
+                fields.initial_stock_location.value = data.default_location;
+            }
+
+            // Remove "default_supplier" field
+            delete fields['default_supplier'];
 
             // If we are making a "variant" part
             if (options.variant) {
@@ -321,7 +378,7 @@ function duplicatePart(pk, options={}) {
                 method: 'POST',
                 fields: fields,
                 groups: partGroups(),
-                title: '{% trans "Duplicate Part" %}',
+                title: title,
                 data: data,
                 onSuccess: function(data) {
                     // Follow the new part
@@ -333,24 +390,23 @@ function duplicatePart(pk, options={}) {
 }
 
 
+/* Toggle the 'starred' status of a part.
+ * Performs AJAX queries and updates the display on the button.
+ * 
+ * options:
+ * - button: ID of the button (default = '#part-star-icon')
+ * - URL: API url of the object
+ * - user: pk of the user
+ */
 function toggleStar(options) {
-    /* Toggle the 'starred' status of a part.
-     * Performs AJAX queries and updates the display on the button.
-     * 
-     * options:
-     * - button: ID of the button (default = '#part-star-icon')
-     * - part: pk of the part object
-     * - user: pk of the user
-     */
 
-    var url = `/api/part/${options.part}/`;
-
-    inventreeGet(url, {}, {
+    inventreeGet(options.url, {}, {
         success: function(response) {
+
             var starred = response.starred;
 
             inventreePut(
-                url,
+                options.url,
                 {
                     starred: !starred,
                 },
@@ -358,9 +414,19 @@ function toggleStar(options) {
                     method: 'PATCH',
                     success: function(response) {
                         if (response.starred) {
-                            $(options.button).addClass('icon-yellow');
+                            $(options.button).removeClass('fa fa-bell-slash').addClass('fas fa-bell icon-green');
+                            $(options.button).attr('title', '{% trans "You are subscribed to notifications for this item" %}');
+
+                            showMessage('{% trans "You have subscribed to notifications for this item" %}', {
+                                style: 'success',
+                            });
                         } else {
-                            $(options.button).removeClass('icon-yellow');
+                            $(options.button).removeClass('fas fa-bell icon-green').addClass('fa fa-bell-slash');
+                            $(options.button).attr('title', '{% trans "Subscribe to notifications for this item" %}');
+
+                            showMessage('{% trans "You have unsubscribed to notifications for this item" %}', {
+                                style: 'warning',
+                            });
                         }
                     }
                 }
@@ -370,7 +436,71 @@ function toggleStar(options) {
 }
 
 
-function makePartIcons(part, options={}) {
+/* Validate a BOM */
+function validateBom(part_id, options={}) {
+
+    var html = `
+    <div class='alert alert-block alert-success'>
+    {% trans "Validating the BOM will mark each line item as valid" %}
+    </div>
+    `;
+
+    constructForm(`/api/part/${part_id}/bom-validate/`, {
+        method: 'PUT',
+        fields: {
+            valid: {},
+        },
+        preFormContent: html,
+        title: '{% trans "Validate Bill of Materials" %}',
+        reload: options.reload,
+        onSuccess: function(response) {
+            showMessage('{% trans "Validated Bill of Materials" %}');
+        }
+    });
+}
+
+
+/* Duplicate a BOM */
+function duplicateBom(part_id, options={}) {
+
+    constructForm(`/api/part/${part_id}/bom-copy/`, {
+        method: 'POST',
+        fields: {
+            part: {
+                icon: 'fa-shapes',
+                filters: {
+                    assembly: true,
+                    exclude_tree: part_id,
+                }
+            },
+            include_inherited: {},
+            copy_substitutes: {},
+            remove_existing: {},
+            skip_invalid: {},
+        },
+        confirm: true,
+        title: '{% trans "Copy Bill of Materials" %}',
+        onSuccess: function(response) {
+            if (options.success) {
+                options.success(response);
+            }
+        },
+    });
+
+}
+
+
+function partStockLabel(part, options={}) {
+
+    if (part.in_stock) {
+        return `<span class='badge rounded-pill bg-success ${options.classes}'>{% trans "Stock" %}: ${part.in_stock}</span>`;
+    } else {
+        return `<span class='badge rounded-pill bg-danger ${options.classes}'>{% trans "No Stock" %}</span>`;
+    }
+}
+
+
+function makePartIcons(part) {
     /* Render a set of icons for the given part.
      */
 
@@ -393,15 +523,15 @@ function makePartIcons(part, options={}) {
     }
 
     if (part.starred) {
-        html += makeIconBadge('fa-star', '{% trans "Starred part" %}');
+        html += makeIconBadge('fa-bell icon-green', '{% trans "Subscribed part" %}');
     }
 
     if (part.salable) {
-        html += makeIconBadge('fa-dollar-sign', title='{% trans "Salable part" %}');
+        html += makeIconBadge('fa-dollar-sign', '{% trans "Salable part" %}');
     }
 
     if (!part.active) {
-        html += `<span class='label label-warning label-right'>{% trans "Inactive" %}</span>`; 
+        html += `<span class='badge badge-right rounded-pill bg-warning'>{% trans "Inactive" %}</span> `; 
     }
 
     return html;
@@ -418,13 +548,13 @@ function loadPartVariantTable(table, partId, options={}) {
     params.ancestor = partId;
 
     // Load filters
-    var filters = loadTableFilters("variants");
+    var filters = loadTableFilters('variants');
 
     for (var key in params) {
         filters[key] = params[key];
     }
 
-    setupFilterList("variants", $(table));
+    setupFilterList('variants', $(table));
 
     var cols = [
         {
@@ -437,7 +567,7 @@ function loadPartVariantTable(table, partId, options={}) {
             field: 'name',
             title: '{% trans "Name" %}',
             switchable: false,
-            formatter: function(value, row, index, field) {
+            formatter: function(value, row) {
                 var html = '';
 
                 var name = '';
@@ -478,7 +608,7 @@ function loadPartVariantTable(table, partId, options={}) {
                 }
 
                 if (!row.active) {
-                    html += `<span class='label label-warning label-right'>{% trans "Inactive" %}</span>`; 
+                    html += `<span class='badge badge-right rounded-pill bg-warning'>{% trans "Inactive" %}</span>`; 
                 }
 
                 return html;
@@ -500,18 +630,20 @@ function loadPartVariantTable(table, partId, options={}) {
             field: 'in_stock',
             title: '{% trans "Stock" %}',
             formatter: function(value, row) {
-                return renderLink(value, `/part/${row.pk}/?display=stock`);
+                return renderLink(value, `/part/${row.pk}/?display=part-stock`);
             }
         }
     ];
 
     table.inventreeTable({
-        url: "{% url 'api-part-list' %}",
+        url: '{% url "api-part-list" %}',
         name: 'partvariants',
         showColumns: true,
         original: params,
         queryParams: filters,
-        formatNoMatches: function() { return '{% trans "No variants found" %}'; },
+        formatNoMatches: function() {
+            return '{% trans "No variants found" %}';
+        },
         columns: cols,
         treeEnable: true,
         rootParentId: partId,
@@ -545,13 +677,15 @@ function loadPartParameterTable(table, url, options) {
     var params = options.params || {};
 
     // Load filters
-    var filters = loadTableFilters("part-parameters");
+    var filters = loadTableFilters('part-parameters');
 
     for (var key in params) {
         filters[key] = params[key];
     }
 
-    // setupFilterLsit("#part-parameters", $(table));
+    var filterTarget = options.filterTarget || '#filter-list-parameters';
+
+    setupFilterList('part-parameters', $(table), filterTarget);
 
     $(table).inventreeTable({
         url: url,
@@ -559,7 +693,9 @@ function loadPartParameterTable(table, url, options) {
         queryParams: filters,
         name: 'partparameters',
         groupBy: false,
-        formatNoMatches: function() { return '{% trans "No parameters found" %}'; },
+        formatNoMatches: function() {
+            return '{% trans "No parameters found" %}';
+        },
         columns: [
             {
                 checkbox: true,
@@ -641,6 +777,296 @@ function loadPartParameterTable(table, url, options) {
 }
 
 
+/*
+ * Construct a table showing a list of purchase orders for a given part.
+ * 
+ * This requests API data from the PurchaseOrderLineItem endpoint
+ */
+function loadPartPurchaseOrderTable(table, part_id, options={}) {
+
+    options.params = options.params || {};
+
+    // Construct API filterset
+    options.params.base_part = part_id;
+    options.params.part_detail = true;
+    options.params.order_detail = true;
+    
+    var filters = loadTableFilters('purchaseorderlineitem');
+
+    for (var key in options.params) {
+        filters[key] = options.params[key];
+    }
+
+    setupFilterList('purchaseorderlineitem', $(table), '#filter-list-partpurchaseorders');
+
+    $(table).inventreeTable({
+        url: '{% url "api-po-line-list" %}',
+        queryParams: filters,
+        name: 'partpurchaseorders',
+        original: options.params,
+        showColumns: true,
+        uniqueId: 'pk',
+        formatNoMatches: function() {
+            return '{% trans "No purchase orders found" %}';
+        },
+        onPostBody: function() {
+            $(table).find('.button-line-receive').click(function() {
+                var pk = $(this).attr('pk');
+
+                var line_item = $(table).bootstrapTable('getRowByUniqueId', pk);
+
+                if (!line_item) {
+                    console.log('WARNING: getRowByUniqueId returned null');
+                    return;
+                }
+
+                receivePurchaseOrderItems(
+                    line_item.order,
+                    [
+                        line_item,
+                    ],
+                    {
+                        success: function() {
+                            $(table).bootstrapTable('refresh');
+                        }
+                    }
+                );
+            });
+        },
+        columns: [
+            {
+                field: 'order',
+                title: '{% trans "Purchase Order" %}',
+                switchable: false,
+                formatter: function(value, row) {
+                    var order = row.order_detail;
+
+                    if (!order) {
+                        return '-';
+                    }
+
+                    var ref = global_settings.PURCHASEORDER_REFERENCE_PREFIX + order.reference;
+
+                    var html = renderLink(ref, `/order/purchase-order/${order.pk}/`);
+
+                    html += purchaseOrderStatusDisplay(
+                        order.status,
+                        {
+                            classes: 'float-right',
+                        }
+                    );
+
+                    return html;
+                },
+            },
+            {
+                field: 'supplier',
+                title: '{% trans "Supplier" %}',
+                switchable: true,
+                formatter: function(value, row) {
+
+                    if (row.supplier_part_detail && row.supplier_part_detail.supplier_detail) {
+                        var supp = row.supplier_part_detail.supplier_detail;
+                        var html = imageHoverIcon(supp.thumbnail || supp.image);
+
+                        html += ' ' + renderLink(supp.name, `/company/${supp.pk}/`);
+
+                        return html;
+                    } else {
+                        return '-';
+                    }
+                }
+            },
+            {
+                field: 'sku',
+                title: '{% trans "SKU" %}',
+                switchable: true,
+                formatter: function(value, row) {
+                    if (row.supplier_part_detail) {
+                        var supp = row.supplier_part_detail;
+
+                        return renderLink(supp.SKU, `/supplier-part/${supp.pk}/`);
+                    } else {
+                        return '-';
+                    }
+                },
+            },
+            {
+                field: 'mpn',
+                title: '{% trans "MPN" %}',
+                switchable: true,
+                formatter: function(value, row) {
+                    if (row.supplier_part_detail && row.supplier_part_detail.manufacturer_part_detail) {
+                        var manu = row.supplier_part_detail.manufacturer_part_detail;
+                        return renderLink(manu.MPN, `/manufacturer-part/${manu.pk}/`);
+                    }
+                }
+            },
+            {
+                field: 'quantity',
+                title: '{% trans "Quantity" %}',
+            },
+            {
+                field: 'target_date',
+                title: '{% trans "Target Date" %}',
+                switchable: true,
+                sortable: true,
+                formatter: function(value, row) {
+                    if (row.target_date) {
+                        var html = row.target_date;
+
+                        if (row.overdue) {
+                            html += `<span class='fas fa-calendar-alt icon-red float-right' title='{% trans "This line item is overdue" %}'></span>`;
+                        }
+
+                        return html;
+
+                    } else if (row.order_detail && row.order_detail.target_date) {
+                        return `<em>${row.order_detail.target_date}</em>`;
+                    } else {
+                        return '-';
+                    }
+                }
+            },
+            {
+                field: 'received',
+                title: '{% trans "Received" %}',
+                switchable: true,
+            },
+            {
+                field: 'purchase_price',
+                title: '{% trans "Price" %}',
+                switchable: true,
+                formatter: function(value, row) {
+                    var formatter = new Intl.NumberFormat(
+                        'en-US',
+                        {
+                            style: 'currency',
+                            currency: row.purchase_price_currency,
+                        }
+                    );
+
+                    return formatter.format(row.purchase_price);
+                }
+            },
+            {
+                field: 'actions',
+                title: '',
+                switchable: false,
+                formatter: function(value, row) {
+                    
+                    if (row.received >= row.quantity) {
+                        // Already recevied
+                        return `<span class='badge bg-success rounded-pill'>{% trans "Received" %}</span>`;
+                    } else if (row.order_detail && row.order_detail.status == {{ PurchaseOrderStatus.PLACED }}) {
+                        var html = `<div class='btn-group' role='group'>`;
+                        var pk = row.pk;
+
+                        html += makeIconButton('fa-sign-in-alt', 'button-line-receive', pk, '{% trans "Receive line item" %}');
+
+                        html += `</div>`;
+                        return html;
+                    } else {
+                        return '';
+                    }
+                }
+            }
+        ],
+    });
+}
+
+
+function loadRelatedPartsTable(table, part_id, options={}) {
+    /*
+     * Load table of "related" parts
+     */
+
+    options.params = options.params || {};
+
+    options.params.part = part_id;
+
+    var filters = {};
+
+    for (var key in options.params) {
+        filters[key] = options.params[key];
+    }
+
+    setupFilterList('related', $(table), options.filterTarget);
+
+    function getPart(row) {
+        if (row.part_1 == part_id) {
+            return row.part_2_detail;
+        } else {
+            return row.part_1_detail;
+        }
+    }
+
+    var columns = [
+        {
+            field: 'name',
+            title: '{% trans "Part" %}',
+            switchable: false,
+            formatter: function(value, row) {
+
+                var part = getPart(row);
+
+                var html = imageHoverIcon(part.thumbnail) + renderLink(part.full_name, `/part/${part.pk}/`);
+
+                html += makePartIcons(part);
+
+                return html;
+            }
+        },
+        {
+            field: 'description',
+            title: '{% trans "Description" %}',
+            formatter: function(value, row) {
+                return getPart(row).description;
+            }
+        },
+        {
+            field: 'actions',
+            title: '',
+            switchable: false,
+            formatter: function(value, row) {
+                
+                var html = `<div class='btn-group float-right' role='group'>`;
+
+                html += makeIconButton('fa-trash-alt icon-red', 'button-related-delete', row.pk, '{% trans "Delete part relationship" %}');
+
+                html += '</div>';
+
+                return html;
+            }
+        }
+    ];
+
+    $(table).inventreeTable({
+        url: '{% url "api-part-related-list" %}',
+        groupBy: false,
+        name: 'related',
+        original: options.params,
+        queryParams: filters,
+        columns: columns,
+        showColumns: false,
+        search: true,
+        onPostBody: function() {
+            $(table).find('.button-related-delete').click(function() {
+                var pk = $(this).attr('pk');
+
+                constructForm(`/api/part/related/${pk}/`, {
+                    method: 'DELETE',
+                    title: '{% trans "Delete Part Relationship" %}',
+                    onSuccess: function() {
+                        $(table).bootstrapTable('refresh');
+                    }
+                });
+            });
+        },
+    });
+}
+
+
 function loadParametricPartTable(table, options={}) {
     /* Load parametric table for part parameters
      * 
@@ -650,19 +1076,19 @@ function loadParametricPartTable(table, options={}) {
      *  - table_data: Parameters data
      */
 
-    var table_headers = options.headers
-    var table_data = options.data
+    var table_headers = options.headers;
+    var table_data = options.data;
 
     var columns = [];
 
-    for (header of table_headers) {
+    for (var header of table_headers) {
         if (header === 'part') {
             columns.push({
                 field: header,
                 title: '{% trans "Part" %}',
                 sortable: true,
                 sortName: 'name',
-                formatter: function(value, row, index, field) {
+                formatter: function(value, row) {
 
                     var name = '';
 
@@ -687,8 +1113,6 @@ function loadParametricPartTable(table, options={}) {
                 title: header,
                 sortable: true,
                 filterControl: 'input',
-                /* TODO: Search icons are not displayed */
-                /*clear: 'fa-times icon-red',*/
             });
         }
     }
@@ -698,7 +1122,9 @@ function loadParametricPartTable(table, options={}) {
         queryParams: table_headers,
         groupBy: false,
         name: options.name || 'parametric',
-        formatNoMatches: function() { return '{% trans "No parts found" %}'; },
+        formatNoMatches: function() {
+            return '{% trans "No parts found" %}';
+        },
         columns: columns,
         showColumns: true,
         data: table_data,
@@ -713,14 +1139,10 @@ function partGridTile(part) {
     // Rows for table view
     var rows = '';
 
-    if (part.IPN) {
-        rows += `<tr><td><b>{% trans "IPN" %}</b></td><td>${part.IPN}</td></tr>`;
-    }
-
     var stock = `${part.in_stock}`;
 
     if (!part.in_stock) {
-        stock = `<span class='label label-red'>{% trans "No Stock" %}</label>`;
+        stock = `<span class='badge rounded-pill bg-danger'>{% trans "No Stock" %}</span>`;
     }
 
     rows += `<tr><td><b>{% trans "Stock" %}</b></td><td>${stock}</td></tr>`;
@@ -735,8 +1157,8 @@ function partGridTile(part) {
 
     var html = `
     
-    <div class='col-sm-3 card'>
-        <div class='panel panel-default panel-inventree'>
+    <div class='card product-card borderless'>
+        <div class='panel product-card-panel'>
             <div class='panel-heading'>
                 <a href='/part/${part.pk}/'>
                     <b>${part.full_name}</b>
@@ -776,6 +1198,7 @@ function loadPartTable(table, url, options={}) {
      *      query: extra query params for API request
      *      buttons: If provided, link buttons to selection status of this table
      *      disableFilters: If true, disable custom filters
+     *      actions: Provide a callback function to construct an "actions" column
      */
 
     // Ensure category detail is included
@@ -785,15 +1208,17 @@ function loadPartTable(table, url, options={}) {
 
     var filters = {};
 
+    var col = null;
+
     if (!options.disableFilters) {
-        filters = loadTableFilters("parts");
+        filters = loadTableFilters('parts');
     }
 
     for (var key in params) {
         filters[key] = params[key];
     }
 
-    setupFilterList("parts", $(table), options.filterTarget || null);
+    setupFilterList('parts', $(table), options.filterTarget, {download: true});
 
     var columns = [
         {
@@ -814,110 +1239,113 @@ function loadPartTable(table, url, options={}) {
         });
     }
 
-    columns.push({
+    col = {
         field: 'IPN',
-        title: 'IPN',
-        sortable: true,
-    }),
+        title: '{% trans "IPN" %}',
+    };
 
-    columns.push({
+    if (!options.params.ordering) {
+        col['sortable'] = true;
+    }
+
+    columns.push(col);
+
+    col = {
         field: 'name',
         title: '{% trans "Part" %}',
-        sortable: true,
         switchable: false,
-        formatter: function(value, row, index, field) {
+        formatter: function(value, row) {
 
-            var name = '';
+            var name = row.full_name;
 
-            if (row.IPN) {
-                name += row.IPN;
-                name += ' | ';
-            }
-
-            name += value;
-
-            if (row.revision) {
-                name += ' | ';
-                name += row.revision;
-            }
-
-            if (row.is_template) {
-                name = '<i>' + name + '</i>';
-            }
-
-            var display = imageHoverIcon(row.thumbnail) + renderLink(name, '/part/' + row.pk + '/');
+            var display = imageHoverIcon(row.thumbnail) + renderLink(name, `/part/${row.pk}/`);
 
             display += makePartIcons(row);
 
             return display; 
         }
-    });
+    };
+
+    if (!options.params.ordering) {
+        col['sortable'] = true;
+    }
+
+    columns.push(col);
 
     columns.push({
         field: 'description',
         title: '{% trans "Description" %}',
-        formatter: function(value, row, index, field) {
+        formatter: function(value, row) {
 
             if (row.is_template) {
-                value = '<i>' + value + '</i>';
+                value = `<i>${value}</i>`;
             }
 
             return value;
         }
     });
 
-    columns.push({
-        sortable: true,
+    col = {
         sortName: 'category',
         field: 'category_detail',
         title: '{% trans "Category" %}',
-        formatter: function(value, row, index, field) {
+        formatter: function(value, row) {
             if (row.category) {
-                return renderLink(value.pathstring, "/part/category/" + row.category + "/");
-            }
-            else {
+                return renderLink(value.pathstring, `/part/category/${row.category}/`);
+            } else {
                 return '{% trans "No category" %}';
             }
         }   
-    });
+    };
 
-    columns.push({
+    if (!options.params.ordering) {
+        col['sortable'] = true;
+    }
+
+    columns.push(col);
+
+    col = {
         field: 'in_stock',
         title: '{% trans "Stock" %}',
         searchable: false,
-        sortable: true,
-        formatter: function(value, row, index, field) {            
-            var link = "stock";
+        formatter: function(value, row) {            
+            var link = '?display=part-stock';
 
             if (value) {
                 // There IS stock available for this part
 
                 // Is stock "low" (below the 'minimum_stock' quantity)?
                 if (row.minimum_stock && row.minimum_stock > value) {
-                    value += "<span class='label label-right label-warning'>{% trans "Low stock" %}</span>";
+                    value += `<span class='badge badge-right rounded-pill bg-warning'>{% trans "Low stock" %}</span>`;
                 }
 
             } else if (row.on_order) {
                 // There is no stock available, but stock is on order
-                value = "0<span class='label label-right label-primary'>{% trans "On Order" %}: " + row.on_order + "</span>";
-                link = "orders";
+                value = `0<span class='badge badge-right rounded-pill bg-info'>{% trans "On Order" %}: ${row.on_order}</span>`;
+                link = '?display=purchase-orders';
             } else if (row.building) {
                 // There is no stock available, but stock is being built
-                value = "0<span class='label label-right label-info'>{% trans "Building" %}: " + row.building + "</span>";
-                link = "builds";
+                value = `0<span class='badge badge-right rounded-pill bg-info'>{% trans "Building" %}: ${row.building}</span>`;
+                link = '?display=build-orders';
             } else {
                 // There is no stock available
-                value = "0<span class='label label-right label-danger'>{% trans "No Stock" %}</span>";
+                value = `0<span class='badge badge-right rounded-pill bg-danger'>{% trans "No Stock" %}</span>`;
             }
 
-            return renderLink(value, '/part/' + row.pk + "/" + link + "/");
+            return renderLink(value, `/part/${row.pk}/${link}`);
         }
-    });
+    };
+
+    if (!options.params.ordering) {
+        col['sortable'] = true;
+    }
+
+    columns.push(col);
 
     columns.push({
         field: 'link',
         title: '{% trans "Link" %}',
-        formatter: function(value, row, index, field) {
+        formatter: function(value) {
             return renderLink(
                 value, value,
                 {
@@ -928,6 +1356,23 @@ function loadPartTable(table, url, options={}) {
         }
     });
 
+    // Push an "actions" column
+    if (options.actions) {
+        columns.push({
+            field: 'actions',
+            title: '',
+            switchable: false,
+            visible: true,
+            searchable: false,
+            sortable: false,
+            formatter: function(value, row) {
+                return options.actions(value, row);
+            }
+        });
+    }
+
+    var grid_view = options.gridView && inventreeLoad('part-grid-view') == 1;
+
     $(table).inventreeTable({
         url: url,
         method: 'get',
@@ -937,11 +1382,61 @@ function loadPartTable(table, url, options={}) {
         original: params,
         sidePagination: 'server',
         pagination: 'true',
-        formatNoMatches: function() { return '{% trans "No parts found" %}'; },
+        formatNoMatches: function() {
+            return '{% trans "No parts found" %}';
+        },
         columns: columns,
         showColumns: true,
-        showCustomView: false,
+        showCustomView: grid_view,
         showCustomViewButton: false,
+        onPostBody: function() {
+            grid_view = inventreeLoad('part-grid-view') == 1;
+            if (grid_view) {
+                $('#view-part-list').removeClass('btn-secondary').addClass('btn-outline-secondary');
+                $('#view-part-grid').removeClass('btn-outline-secondary').addClass('btn-secondary');
+            } else {
+                $('#view-part-grid').removeClass('btn-secondary').addClass('btn-outline-secondary');
+                $('#view-part-list').removeClass('btn-outline-secondary').addClass('btn-secondary');
+            }
+
+            if (options.onPostBody) {
+                options.onPostBody();
+            }
+        },
+        buttons: options.gridView ? [
+            {
+                icon: 'fas fa-bars',
+                attributes: {
+                    title: '{% trans "Display as list" %}',
+                    id: 'view-part-list',
+                },
+                event: () => {
+                    inventreeSave('part-grid-view', 0);
+                    $(table).bootstrapTable(
+                        'refreshOptions',
+                        {
+                            showCustomView: false,
+                        }
+                    );
+                }
+            },
+            {
+                icon: 'fas fa-th',
+                attributes: {
+                    title: '{% trans "Display as grid" %}',
+                    id: 'view-part-grid',
+                },
+                event: () => {
+                    inventreeSave('part-grid-view', 1);
+                    $(table).bootstrapTable(
+                        'refreshOptions',
+                        {
+                            showCustomView: true,
+                        }
+                    );
+                }
+            }
+        ] : [],
         customView: function(data) {
 
             var html = '';
@@ -950,9 +1445,9 @@ function loadPartTable(table, url, options={}) {
 
             data.forEach(function(row, index) {
                 
-                // Force a new row every 4 columns, to prevent visual issues
-                if ((index > 0) && (index % 4 == 0) && (index < data.length)) {
-                    html += `</div><div class='row'>`;
+                // Force a new row every 5 columns
+                if ((index > 0) && (index % 5 == 0) && (index < data.length)) {
+                    html += `</div><div class='row full-height'>`;
                 }
 
                 html += partGridTile(row);
@@ -970,8 +1465,8 @@ function loadPartTable(table, url, options={}) {
 
     /* Button callbacks for part table buttons */
 
-    $("#multi-part-order").click(function() {
-        var selections = $(table).bootstrapTable("getSelections");
+    $('#multi-part-order').click(function() {
+        var selections = $(table).bootstrapTable('getSelections');
 
         var parts = [];
 
@@ -979,15 +1474,15 @@ function loadPartTable(table, url, options={}) {
             parts.push(item.pk);
         });
 
-        launchModalForm("/order/purchase-order/order-parts/", {
+        launchModalForm('/order/purchase-order/order-parts/', {
             data: {
                 parts: parts,
             },
         });
     });
 
-    $("#multi-part-category").click(function() {
-        var selections = $(table).bootstrapTable("getSelections");
+    $('#multi-part-category').click(function() {
+        var selections = $(table).bootstrapTable('getSelections');
 
         var parts = [];
 
@@ -995,7 +1490,7 @@ function loadPartTable(table, url, options={}) {
             parts.push(item.pk);
         });
 
-        launchModalForm("/part/set-category/", {
+        launchModalForm('/part/set-category/', {
             data: {
                 parts: parts,
             },
@@ -1016,7 +1511,7 @@ function loadPartTable(table, url, options={}) {
     });
 
     $('#multi-part-export').click(function() {
-        var selections = $(table).bootstrapTable("getSelections");
+        var selections = $(table).bootstrapTable('getSelections');
 
         var parts = '';
 
@@ -1030,8 +1525,10 @@ function loadPartTable(table, url, options={}) {
 }
 
 
+/*
+ * Display a table of part categories
+ */
 function loadPartCategoryTable(table, options) {
-    /* Display a table of part categories */
 
     var params = options.params || {};
 
@@ -1045,6 +1542,13 @@ function loadPartCategoryTable(table, options) {
         filters = loadTableFilters(filterKey);
     }
 
+    
+    var tree_view = options.allowTreeView && inventreeLoad('category-tree-view') == 1;
+
+    if (tree_view) {
+        params.cascade = true;   
+    }
+
     var original = {};
 
     for (var key in params) {
@@ -1055,13 +1559,88 @@ function loadPartCategoryTable(table, options) {
     setupFilterList(filterKey, table, filterListElement);
 
     table.inventreeTable({
+        treeEnable: tree_view,
+        rootParentId: tree_view ? options.params.parent : null,
+        uniqueId: 'pk',
+        idField: 'pk',
+        treeShowField: 'name',
+        parentIdField: tree_view ? 'parent' : null,
         method: 'get',
         url: options.url || '{% url "api-part-category-list" %}',
         queryParams: filters,
-        sidePagination: 'server',
+        disablePagination: tree_view,
+        sidePagination: tree_view ? 'client' : 'server',
+        serverSort: !tree_view, 
+        search: !tree_view,
         name: 'category',
         original: original,
         showColumns: true,
+        buttons: options.allowTreeView ? [
+            {
+                icon: 'fas fa-bars',
+                attributes: {
+                    title: '{% trans "Display as list" %}',
+                    id: 'view-category-list',
+                },
+                event: () => {
+                    inventreeSave('category-tree-view', 0);
+                    table.bootstrapTable(
+                        'refreshOptions',
+                        {
+                            treeEnable: false,
+                            serverSort: true,
+                            search: true,
+                            pagination: true,
+                        }
+                    );
+                }
+            },
+            {
+                icon: 'fas fa-sitemap',
+                attributes: {
+                    title: '{% trans "Display as tree" %}',
+                    id: 'view-category-tree',
+                },
+                event: () => {
+                    inventreeSave('category-tree-view', 1);
+                    table.bootstrapTable(
+                        'refreshOptions',
+                        {
+                            treeEnable: true,
+                            serverSort: false,
+                            search: false,
+                            pagination: false,
+                        }
+                    );
+                }
+            }
+        ] : [],
+        onPostBody: function() {
+
+            if (options.allowTreeView) {
+
+                tree_view = inventreeLoad('category-tree-view') == 1;
+
+                if (tree_view) {
+
+                    $('#view-category-list').removeClass('btn-secondary').addClass('btn-outline-secondary');
+                    $('#view-category-tree').removeClass('btn-outline-secondary').addClass('btn-secondary');
+                    
+                    table.treegrid({
+                        treeColumn: 0,
+                        onChange: function() {
+                            table.bootstrapTable('resetView');
+                        },
+                        onExpand: function() {
+                            
+                        }
+                    });
+                } else {
+                    $('#view-category-tree').removeClass('btn-secondary').addClass('btn-outline-secondary');
+                    $('#view-category-list').removeClass('btn-outline-secondary').addClass('btn-secondary');
+                }
+            }
+        },
         columns: [
             {
                 checkbox: true,
@@ -1076,10 +1655,17 @@ function loadPartCategoryTable(table, options) {
                 switchable: true,
                 sortable: true,
                 formatter: function(value, row) {
-                    return renderLink(
+
+                    var html = renderLink(
                         value,
                         `/part/category/${row.pk}/`
                     );
+
+                    if (row.starred) {
+                        html += makeIconBadge('fa-bell icon-green', '{% trans "Subscribed category" %}');
+                    }
+
+                    return html;
                 }
             },
             {
@@ -1091,7 +1677,8 @@ function loadPartCategoryTable(table, options) {
             {
                 field: 'pathstring',
                 title: '{% trans "Path" %}',
-                switchable: true,
+                switchable: !tree_view,
+                visible: !tree_view,
                 sortable: false,
             },
             {
@@ -1115,15 +1702,15 @@ function loadPartTestTemplateTable(table, options) {
 
     var filterListElement = options.filterList || '#filter-list-parttests';
 
-    var filters = loadTableFilters("parttests");
+    var filters = loadTableFilters('parttests');
 
     var original = {};
 
-    for (var key in params) {
-        original[key] = params[key];
+    for (var k in params) {
+        original[k] = params[k];
     }
 
-    setupFilterList("parttests", table, filterListElement);
+    setupFilterList('parttests', table, filterListElement);
 
     // Override the default values, or add new ones
     for (var key in params) {
@@ -1135,7 +1722,7 @@ function loadPartTestTemplateTable(table, options) {
         formatNoMatches: function() {
             return '{% trans "No test templates matching query" %}';
         },
-        url: "{% url 'api-part-test-template-list' %}",
+        url: '{% url "api-part-test-template-list" %}',
         queryParams: filters,
         name: 'testtemplate',
         original: original,
@@ -1156,7 +1743,7 @@ function loadPartTestTemplateTable(table, options) {
             },
             {
                 field: 'required',
-                title: "{% trans 'Required' %}",
+                title: '{% trans "Required" %}',
                 sortable: true,
                 formatter: function(value) {
                     return yesNoLabel(value);
@@ -1197,7 +1784,43 @@ function loadPartTestTemplateTable(table, options) {
                     }
                 }
             }
-        ]
+        ],
+        onPostBody: function() {
+
+            table.find('.button-test-edit').click(function() {
+                var pk = $(this).attr('pk');
+            
+                var url = `/api/part/test-template/${pk}/`;
+            
+                constructForm(url, {
+                    fields: {
+                        test_name: {},
+                        description: {},
+                        required: {},
+                        requires_value: {},
+                        requires_attachment: {},
+                    },
+                    title: '{% trans "Edit Test Result Template" %}',
+                    onSuccess: function() {
+                        table.bootstrapTable('refresh');
+                    },
+                });
+            });
+
+            table.find('.button-test-delete').click(function() {
+                var pk = $(this).attr('pk');
+            
+                var url = `/api/part/test-template/${pk}/`;
+            
+                constructForm(url, {
+                    method: 'DELETE',
+                    title: '{% trans "Delete Test Result Template" %}',
+                    onSuccess: function() {
+                        table.bootstrapTable('refresh');
+                    },
+                });
+            });
+        }
     });
 }
 
@@ -1223,28 +1846,29 @@ function loadPriceBreakTable(table, options) {
         onLoadSuccess: function(tableData) {
             if (linkedGraph) {
                 // sort array
-                tableData = tableData.sort((a,b)=>a.quantity-b.quantity);
+                tableData = tableData.sort((a, b) => (a.quantity - b.quantity));
 
                 // split up for graph definition
-                var graphLabels = Array.from(tableData, x => x.quantity);
-                var graphData = Array.from(tableData, x => x.price);
+                var graphLabels = Array.from(tableData, (x) => (x.quantity));
+                var graphData = Array.from(tableData, (x) => (x.price));
 
                 // destroy chart if exists
-                if (chart){
+                if (chart) {
                     chart.destroy();
                 }
                 chart = loadLineChart(linkedGraph,
                     {
                         labels: graphLabels,
-                        datasets:  [
-                        {
-                        label: '{% trans "Unit Price" %}',
-                        data: graphData,
-                        backgroundColor: 'rgba(255, 206, 86, 0.2)',
-                        borderColor: 'rgb(255, 206, 86)',
-                        stepped: true,
-                        fill: true,
-                        },]
+                        datasets: [
+                            {
+                                label: '{% trans "Unit Price" %}',
+                                data: graphData,
+                                backgroundColor: 'rgba(255, 206, 86, 0.2)',
+                                borderColor: 'rgb(255, 206, 86)',
+                                stepped: true,
+                                fill: true,
+                            },
+                        ],
                     }
                 );
             }
@@ -1265,10 +1889,10 @@ function loadPriceBreakTable(table, options) {
                 field: 'price',
                 title: '{% trans "Price" %}',
                 sortable: true,
-                formatter: function(value, row, index) {
+                formatter: function(value, row) {
                     var html = value;
     
-                    html += `<div class='btn-group float-right' role='group'>`
+                    html += `<div class='btn-group float-right' role='group'>`;
 
                     html += makeIconButton('fa-edit icon-blue', `button-${name}-edit`, row.pk, `{% trans "Edit ${human_name}" %}`);
                     html += makeIconButton('fa-trash-alt icon-red', `button-${name}-delete`, row.pk, `{% trans "Delete ${human_name}" %}`);
@@ -1318,8 +1942,8 @@ function initPriceBreakSet(table, options) {
         }
     );
 
-    function reloadPriceBreakTable(){
-        table.bootstrapTable("refresh");
+    function reloadPriceBreakTable() {
+        table.bootstrapTable('refresh');
     }
 
     pb_new_btn.click(function() {
@@ -1407,11 +2031,25 @@ function loadBomChart(context, data) {
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: {legend: {position: 'bottom'},
-            scales: {xAxes: [{beginAtZero: true, ticks: {autoSkip: false}}]}}
+            plugins: {
+                legend: {
+                    position: 'bottom',
+                },
+                scales: {
+                    xAxes: [
+                        {
+                            beginAtZero: true,
+                            ticks: {
+                                autoSkip: false,
+                            }
+                        }
+                    ]
+                }
+            }
         }
     });
 }
+
 
 function loadSellPricingChart(context, data) {
     return new Chart(context, {
@@ -1420,21 +2058,29 @@ function loadSellPricingChart(context, data) {
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: {legend: {position: 'bottom'}},
+            plugins: {
+                legend: {
+                    position: 'bottom'
+                }
+            },
             scales: {
                 y: {
                     type: 'linear',
                     position: 'left',
-                    grid: {display: false},
+                    grid: {
+                        display: false
+                    },
                     title: {
                         display: true,
-                        text: '{% trans "Unit Price" %}'
+                        text: '{% trans "Unit Price" %}',
                     }
                 },
                 y1: {
                     type: 'linear',
                     position: 'right',
-                    grid: {display: false},
+                    grid: {
+                        display: false
+                    },
                     titel: {
                         display: true,
                         text: '{% trans "Quantity" %}',

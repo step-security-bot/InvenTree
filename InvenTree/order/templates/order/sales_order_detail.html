@@ -6,70 +6,118 @@
 {% load static %}
 {% load markdownify %}
 
-{% block menubar %}
-{% include "order/so_navbar.html"  %}
+{% block sidebar %}
+{% include "order/so_sidebar.html"  %}
 {% endblock %}
 
 
 {% block page_content %}
 
-<div class='panel-hidden' id='panel-order-items'>
-    <div class='panel panel-default panel-inventree'>
-        <div class='panel-heading'>
+<div class='panel panel-hidden' id='panel-order-items'>
+    <div class='panel-heading'>
+        <div class='d-flex flex-wrap'>
             <h4>{% trans "Sales Order Items" %}</h4>
-        </div>
-        <div class='panel-content'>
-            {% if roles.sales_order.change and not order.shipment_date %}
-            <div id='order-toolbar-buttons' class='btn-group' style='float: right;'>
+            {% include "spacer.html" %}
+            <div class='btn-group' role='group'>
+                {% if roles.sales_order.change and order.is_pending %}
                 <button type='button' class='btn btn-success' id='new-so-line'>
                     <span class='fas fa-plus-circle'></span> {% trans "Add Line Item" %}
                 </button>
+                {% endif %}
             </div>
-            {% endif %}
-            <table class='table table-striped table-condensed' id='so-lines-table' data-toolbar='#order-toolbar-buttons'>
-            </table>
         </div>
     </div>
-
-    <div class='panel panel-default panel-inventree'>
-        <div class='panel-heading'>
-            <h4>{% trans "Additional Order Lines" %}</h4>
-        </div>
-        
-        <div class='panel-content'>
-            {# do not show 'add' buttons when order was shipped #}
-            {% if roles.sales_order.change and not order.shipment_date %}
-            <div id='order-additional-toolbar-buttons' class='btn-group' style='float: right;'>
-                <button type='button' class='btn btn-success' id='new-add-so-line'>
-                    <span class='fas fa-plus-circle'></span> {% trans "Add Line" %}
-                </button>
+    <div class='panel-content'>
+        <div id='order-toolbar-buttons' class='btn-group' style='float: right;'>
+            <div class='btn-group'>
+                {% include "filter_list.html" with id="sales-order-lines" %}
             </div>
-            {% endif %}
-
-            <table class='table table-striped table-condensed' id='so-additional-lines-table' data-toolbar='#order-additional-toolbar-buttons'></table>
         </div>
+        <table class='table table-striped table-condensed' id='so-lines-table' data-toolbar='#order-toolbar-buttons'>
+        </table>
     </div>
 </div>
 
-<div class='panel panel-default panel-inventree panel-hidden' id='panel-order-builds'>
+{% if order.is_pending %}
+<div class='panel panel-hidden' id='panel-order-shipments'>
+    <div class='panel-heading'>
+        <div class='d-flex flex-row'>
+            <h4>{% trans "Pending Shipments" %}</h4>
+            {% include "spacer.html" %}
+            <div class='btn-group' role='group'>
+                {% if 0 %}
+                <button id='pending-shipment-options' title='{% trans "Actions" %}' class='btn btn-outline-secondary dropdown-toggle' type='button' data-bs-toggle='dropdown'>
+                    <span class='fas fa-tools'></span> <span class='caret'></span>
+                </button>
+                <ul class='dropdown-menu' role='menu'>
+
+                </ul>
+                {% endif %}
+                {% if roles.sales_order.change %}
+                <button type='button' class='btn btn-success' id='new-shipment'>
+                    <span class='fas fa-plus-circle'></span> {% trans "New Shipment" %}
+                </button>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class='panel-content'>
+        {% if roles.sales_order.change %}
+        <div id='pending-shipment-toolbar' class='btn-group' style='float: right;'>
+            <div class='btn-group' role='group'>
+                {% include "filter_list.html" with id="pending-shipments" %}
+            </div>
+        </div>
+        {% endif %}
+        <table class='table table-striped table-condensed' id='pending-shipments-table' data-toolbar='#pending-shipment-toolbar'></table>
+    </div>
+</div>
+{% endif %}
+
+<div class='panel panel-hidden' id='panel-order-shipments-complete'>
+    <div class='panel-heading'>
+        <h4>{% trans "Completed Shipments" %}</h4>
+    </div>
+    <div class='panel-content'>
+        <div id='completed-shipment-toolbar' class='btn-group' style='float: right;'>
+            <div class='btn-group' role='group'>
+                {% include "filter_list.html" with id="completed-shipments" %}
+            </div>
+        </div>
+        <table class='table table-striped table-condensed' id='completed-shipments-table' data-toolbar='#completed-shipment-toolbar'></table>
+    </div>
+</div>
+
+<div class='panel panel-hidden' id='panel-order-builds'>
     <div class='panel-heading'>
         <h4>{% trans "Build Orders" %}</h4>
     </div>
     <div class='panel-content'>
-        <table class='table table-striped table-condensed' id='builds-table'></table>
+        <div id='builds-toolbar' class='btn-group' style='float: right;'>
+            <div class='btn-group' role='group'>
+                {% include "filter_list.html" with id='build' %}
+            </div>
+        </div>
+        <table class='table table-striped table-condensed' id='builds-table' data-toolbar='#builds-toolbar'></table>
     </div>
 </div>
 
-<div class='panel panel-default panel-inventree panel-hidden' id='panel-order-attachments'>
+<div class='panel panel-hidden' id='panel-order-attachments'>
     <div class='panel-heading'>
-        <h4>{% trans "Attachments" %}</h4>
+        <div class='d-flex flex-wrap'>
+            <h4>{% trans "Attachments" %}</h4>
+            {% include "spacer.html" %}
+            <div class='btn-group' role='group'>
+                {% include "attachment_button.html" %}
+            </div>
+        </div>
     </div>
     <div class='panel-content'>
         {% include "attachment_table.html" %}
     </div>
 </div>
 
-<div class='panel panel-default panel-inventree panel-hidden' id='panel-order-notes'>
+<div class='panel panel-hidden' id='panel-order-notes'>
     <div class='panel-heading'>
         <div class='row'>
             <div class='col-sm-6'>
@@ -77,7 +125,7 @@
             </div>
             <div class='col-sm-6'>
                 <div class='btn-group float-right'>
-                    <button type='button' id='edit-notes' title='{% trans "Edit Notes" %}' class='btn btn-small btn-default'>
+                    <button type='button' id='edit-notes' title='{% trans "Edit Notes" %}' class='btn outline-secondary'>
                         <span class='fas fa-edit'>      
                         </span>
                     </button>
@@ -95,6 +143,38 @@
 
 {% block js_ready %}
 {{ block.super }}
+
+    // Callback when the "shipments" panel is first loaded
+    onPanelLoad('order-shipments', function() {
+
+        {% if order.is_pending %}
+        loadSalesOrderShipmentTable('#pending-shipments-table', {
+            order: {{ order.pk }},
+            shipped: false,
+            filter_target: '#filter-list-pending-shipments',
+        });
+
+        $('#new-shipment').click(function() {
+            createSalesOrderShipment({
+                order: {{ order.pk }},
+                reference: '{{ order.reference }}',
+                onSuccess: function(data) {
+                    $('#pending-shipments-table').bootstrapTable('refresh');
+                }
+            });
+        });
+
+        {% endif %}
+
+    });
+    
+    onPanelLoad('order-shipments-complete', function() {
+        loadSalesOrderShipmentTable('#completed-shipments-table', {
+            order: {{ order.pk }},
+            shipped: true,
+            filter_target: '#filter-list-completed-shipments',
+        });
+    });
 
     $('#edit-notes').click(function() {
         constructForm('{% url "api-so-detail" order.pk %}', {
@@ -117,55 +197,21 @@
             },
             label: 'attachment',
             success: function(data, status, xhr) {
-                location.reload();
+                reloadAttachmentTable();
             }
         }
     );
 
-    loadAttachmentTable(
-        '{% url "api-so-attachment-list" %}',
-        {
-            filters: {
-                order: {{ order.pk }},
+    loadAttachmentTable('{% url "api-so-attachment-list" %}', {
+        filters: {
+            order: {{ order.pk }},
+        },
+        fields: {
+            order: {
+                value: {{ order.pk }},
+                hidden: true,
             },
-            onEdit: function(pk) {
-                var url = `/api/order/so/attachment/${pk}/`;
-
-                constructForm(url, {
-                    fields: {
-                        filename: {},
-                        comment: {},
-                    },
-                    onSuccess: reloadAttachmentTable,
-                    title: '{% trans "Edit Attachment" %}',
-                });
-            },
-            onDelete: function(pk) {
-                constructForm(`/api/order/so/attachment/${pk}/`, {
-                    method: 'DELETE',
-                    confirmMessage: '{% trans "Confirm Delete Operation" %}',
-                    title: '{% trans "Delete Attachment" %}',
-                    onSuccess: reloadAttachmentTable,
-                });
-            }
         }
-    );
-
-    $("#new-attachment").click(function() {
-
-        constructForm('{% url "api-so-attachment-list" %}', {
-            method: 'POST',
-            fields: {
-                attachment: {},
-                comment: {},
-                order: {
-                    value: {{ order.pk }},
-                    hidden: true
-                }
-            },
-            onSuccess: reloadAttachmentTable,
-            title: '{% trans "Add Attachment" %}'
-        });
     });
 
     loadBuildTable($("#builds-table"), {
@@ -175,627 +221,30 @@
         },
     });
 
-    function reloadTable() {
-        $("#so-lines-table").bootstrapTable("refresh");
-        reloadTotal;
-    }
+    $("#new-so-line").click(function() {
 
-$("#new-so-line").click(function() {
-
-    constructForm('{% url "api-so-line-list" %}', {
-        fields: {
-            order: {
-                value: {{ order.pk }},
-                hidden: true,
-            },
-            part: {},
-            quantity: {},
-            reference: {},
-            sale_price: {},
-            sale_price_currency: {},
-            notes: {},
-        },
-        method: 'POST',
-        title: '{% trans "Add Line Item" %}',
-        onSuccess: reloadTable,
-    });
-});
-
-{% if order.status == SalesOrderStatus.PENDING %}
-function showAllocationSubTable(index, row, element) {
-    // Construct a table showing stock items which have been allocated against this line item
-
-    var html = `<div class='sub-table'><table class='table table-striped table-condensed' id='allocation-table-${row.pk}'></table></div>`;
-
-    element.html(html);
-
-    var lineItem = row;
-
-    var table = $(`#allocation-table-${row.pk}`);
-
-    table.bootstrapTable({
-        data: row.allocations,
-        showHeader: false,
-        columns: [
-        {
-            width: '50%',
-            field: 'allocated',
-            title: '{% trans "Quantity" %}',
-            formatter: function(value, row, index, field) {
-                var text = '';
-
-                if (row.serial != null && row.quantity == 1) {
-                    text = `{% trans "Serial Number" %}: ${row.serial}`;
-                } else {
-                    text = `{% trans "Quantity" %}: ${row.quantity}`;
-                }
-
-                return renderLink(text, `/stock/item/${row.item}/`);
-            },
-        },
-        {
-            field: 'location',
-            title: 'Location',
-            formatter: function(value, row, index, field) {
-                return renderLink(row.location_path, `/stock/location/${row.location}/`);
-            },
-        },
-        {
-            field: 'po'
-        },
-        {
-            field: 'buttons',
-            title: '{% trans "Actions" %}',
-            formatter: function(value, row, index, field) {
-
-                var html = "<div class='btn-group float-right' role='group'>";
-                var pk = row.pk;
-
-                {% if order.status == SalesOrderStatus.PENDING %}
-                html += makeIconButton('fa-edit icon-blue', 'button-allocation-edit', pk, '{% trans "Edit stock allocation" %}');
-                html += makeIconButton('fa-trash-alt icon-red', 'button-allocation-delete', pk, '{% trans "Delete stock allocation" %}');
-                {% endif %}
-
-                html += "</div>";
-
-                return html;
-            },
-        },
-        ],
-    });
-
-    table.find(".button-allocation-edit").click(function() {
-
-        var pk = $(this).attr('pk');
-
-        launchModalForm(`/order/sales-order/allocation/${pk}/edit/`, {
-            success: reloadTable,
+        var fields = soLineItemFields({
+            order: {{ order.pk }},
         });
-    });
 
-    table.find(".button-allocation-delete").click(function() {
-        var pk = $(this).attr('pk');
-
-        launchModalForm(`/order/sales-order/allocation/${pk}/delete/`, {
-            success: reloadTable, 
-        });
-    });
-}
-{% endif %}
-
-function showFulfilledSubTable(index, row, element) {
-    // Construct a table showing stock items which have been fulfilled against this line item
-
-    var id = `fulfilled-table-${row.pk}`;
-    var html = `<div class='sub-table'><table class='table table-striped table-condensed' id='${id}'></table></div>`;
-
-    element.html(html);
-
-    var lineItem = row;
-
-    $(`#${id}`).bootstrapTable({
-        url: "{% url 'api-stock-list' %}",
-        queryParams: {
-            part: row.part,
-            sales_order: {{ order.id }},
-        },
-        showHeader: false,
-        columns: [
-            {
-                field: 'pk',
-                visible: false,
-            },
-            {
-                field: 'stock',
-                formatter: function(value, row) {
-                    var text = '';
-                    if (row.serial && row.quantity == 1) {
-                        text = `{% trans "Serial Number" %}: ${row.serial}`;
-                    } else {
-                        text = `{% trans "Quantity" %}: ${row.quantity}`;
-                    }
-
-                    return renderLink(text, `/stock/item/${row.pk}/`);
-                },
-            },
-            {
-                field: 'po'
-            },
-        ],
-    });
-}
-
-$("#so-lines-table").inventreeTable({
-    formatNoMatches: function() { return "{% trans 'No matching line items' %}"; },
-    queryParams: {
-        order: {{ order.id }},
-        part_detail: true,
-        allocations: true,
-    },
-    sidePagination: 'server',
-    uniqueId: 'pk',
-    url: "{% url 'api-so-line-list' %}",
-    onPostBody: setupCallbacks,
-    {% if order.status == SalesOrderStatus.PENDING or order.status == SalesOrderStatus.SHIPPED %}
-    detailViewByClick: true,
-    detailView: true,
-    detailFilter: function(index, row) {
-        {% if order.status == SalesOrderStatus.PENDING %}
-        return row.allocated > 0;
-        {% else %}
-        return row.fulfilled > 0;
-        {% endif %}
-    },
-    {% if order.status == SalesOrderStatus.PENDING %}
-    detailFormatter: showAllocationSubTable,
-    {% else %}
-    detailFormatter: showFulfilledSubTable,
-    {% endif %}
-    {% endif %}
-    showFooter: true,
-    columns: [
-        {
-            field: 'pk',
-            title: '{% trans "ID" %}',
-            visible: false,
-            switchable: false,
-        },
-        {
-            sortable: true,
-            sortName: 'part__name',
-            field: 'part',
-            title: '{% trans "Part" %}',
-            formatter: function(value, row, index, field) {
-                if (row.part) {
-                    return imageHoverIcon(row.part_detail.thumbnail) + renderLink(row.part_detail.full_name, `/part/${value}/`);
-                } else {
-                    return '-';
-                }
-            },
-            footerFormatter:  function() {
-                return '{% trans "Total" %}'
-            },
-        },
-        {
-            sortable: true,
-            field: 'reference',
-            title: '{% trans "Reference" %}'
-        },
-        {
-            sortable: true,
-            field: 'quantity',
-            title: '{% trans "Quantity" %}',
-            footerFormatter: function(data) {
-                return data.map(function (row) {
-                  return +row['quantity']
-                }).reduce(function (sum, i) {
-                  return sum + i
-                }, 0)
-            },
-        },
-        {
-            sortable: true,
-            field: 'sale_price',
-            title: '{% trans "Unit Price" %}',
-            formatter: function(value, row) {
-                return row.sale_price_string || row.sale_price;
-            }
-        },
-        {
-            sortable: true,
-            title: '{% trans "Total price" %}',
-            formatter: function(value, row) {
-                var total = row.sale_price * row.quantity;
-                var formatter = new Intl.NumberFormat('en-US', {style: 'currency', currency: row.sale_price_currency});
-                return formatter.format(total)
-            },
-            footerFormatter: function(data) {
-                var total = data.map(function (row) {
-                  return +row['sale_price_converted']*row['quantity']
-                }).reduce(function (sum, i) {
-                  return sum + i
-                }, 0)
-                var currency = (data.slice(-1)[0] && data.slice(-1)[0].sale_price_converted_currency)  || 'USD';
-                var formatter = new Intl.NumberFormat('en-US', {style: 'currency', currency: currency});
-                return formatter.format(total)
-              }
-        },
-
-        {
-            field: 'allocated',
-            {% if order.status == SalesOrderStatus.PENDING %}
-            title: '{% trans "Allocated" %}',
-            {% else %}
-            title: '{% trans "Fulfilled" %}',
-            {% endif %}
-            formatter: function(value, row, index, field) {
-                {% if order.status == SalesOrderStatus.PENDING %}
-                var quantity = row.allocated;
-                {% else %}
-                var quantity = row.fulfilled;
-                {% endif %}
-                return makeProgressBar(quantity, row.quantity, {
-                    id: `order-line-progress-${row.pk}`,
-                });
-            },
-            sorter: function(valA, valB, rowA, rowB) {
-                {% if order.status == SalesOrderStatus.PENDING %}
-                var A = rowA.allocated;
-                var B = rowB.allocated;
-                {% else %}
-                var A = rowA.fulfilled;
-                var B = rowB.fulfilled;
-                {% endif %}
-
-                if (A == 0 && B == 0) {
-                    return (rowA.quantity > rowB.quantity) ? 1 : -1;
-                }
-
-                var progressA = parseFloat(A) / rowA.quantity;
-                var progressB = parseFloat(B) / rowB.quantity;
-
-                return (progressA < progressB) ? 1 : -1;
-            }
-        },
-        {
-            field: 'notes',
-            title: '{% trans "Notes" %}',
-        },
-        {
-            field: 'po',
-            title: '{% trans "PO" %}',
-            formatter: function(value, row, index, field) {
-                var po_name = "";
-                if (row.allocated) {
-                    row.allocations.forEach(function(allocation) {
-                        if (allocation.po != po_name) {
-                            if (po_name) {
-                                po_name = "-";
-                            } else {
-                                po_name = allocation.po
-                            }
-                        }
-                    })
-                }
-                return `<div>` + po_name + `</div>`;
-            }
-        },
-        {% if order.status == SalesOrderStatus.PENDING %}
-        {
-            field: 'buttons',
-            formatter: function(value, row, index, field) {
-
-                var html = `<div class='btn-group float-right' role='group'>`;
-
-                var pk = row.pk;
-
-                if (row.part) {
-                    var part = row.part_detail;
-
-                    if (part.trackable) {
-                        html += makeIconButton('fa-hashtag icon-green', 'button-add-by-sn', pk, '{% trans "Allocate serial numbers" %}');
-                    }
-
-                    html += makeIconButton('fa-sign-in-alt icon-green', 'button-add', pk, '{% trans "Allocate stock" %}');
-
-                    if (part.purchaseable) {
-                        html += makeIconButton('fa-shopping-cart', 'button-buy', row.part, '{% trans "Purchase stock" %}');
-                    }
-
-                    if (part.assembly) {
-                        html += makeIconButton('fa-tools', 'button-build', row.part, '{% trans "Build stock" %}');
-                    }
-
-                    html += makeIconButton('fa-dollar-sign icon-green', 'button-price', pk, '{% trans "Calculate price" %}');
-                }
-
-                html += makeIconButton('fa-edit icon-blue', 'button-edit', pk, '{% trans "Edit line item" %}');
-                html += makeIconButton('fa-trash-alt icon-red', 'button-delete', pk, '{% trans "Delete line item " %}');
-
-                html += `</div>`;
-
-                return html;
-            }
-        },
-        {% endif %}
-    ],
-});
-
-function setupCallbacks() {
-
-    var table = $("#so-lines-table");
-
-    // Set up callbacks for the row buttons
-    table.find(".button-edit").click(function() {
-
-        var pk = $(this).attr('pk');
-
-        constructForm(`/api/order/so-line/${pk}/`, {
-            fields: {
-                quantity: {},
-                reference: {},
-                sale_price: {},
-                sale_price_currency: {},
-                notes: {},
-            },
-            title: '{% trans "Edit Line Item" %}',
-            onSuccess: reloadTable,
-        });
-    });
-
-    table.find(".button-delete").click(function() {
-        var pk = $(this).attr('pk');
-
-        constructForm(`/api/order/so-line/${pk}/`, {
-            method: 'DELETE',
-            title: '{% trans "Delete Line Item" %}',
-            onSuccess: reloadTable,
-        });
-    });
-
-    table.find(".button-add-by-sn").click(function() {
-        var pk = $(this).attr('pk');
-
-        inventreeGet(`/api/order/so-line/${pk}/`, {},
-            {
-                success: function(response) {
-                    launchModalForm('{% url "so-assign-serials" %}', {
-                        success: reloadTable,
-                        data: {
-                            line: pk,
-                            part: response.part, 
-                        }
-                    });
-                }
-            }
-        );
-    });
-
-    table.find(".button-add").click(function() {
-        var pk = $(this).attr('pk');
-
-        launchModalForm(`/order/sales-order/allocation/new/`, {
-            success: reloadTable,
-            data: {
-                line: pk,
+        constructForm('{% url "api-so-line-list" %}', {
+            fields: fields,
+            method: 'POST',
+            title: '{% trans "Add Line Item" %}',
+            onSuccess: function() {
+                $("#so-lines-table").bootstrapTable("refresh");
             },
         });
     });
 
-    table.find(".button-build").click(function() {
-
-        var pk = $(this).attr('pk');
-
-        // Extract the row data from the table!
-        var idx = $(this).closest('tr').attr('data-index');
-
-        var row = table.bootstrapTable('getData')[idx];
-
-        var quantity = 1;
-
-        if (row.allocated < row.quantity) {
-            quantity = row.quantity - row.allocated;
+    loadSalesOrderLineItemTable(
+        '#so-lines-table',
+        {
+            order: {{ order.pk }},
+            status: {{ order.status }},
         }
+    );
 
-        launchModalForm(`/build/new/`, {
-            follow: true,
-            data: {
-                part: pk,
-                sales_order: {{ order.id }},
-                quantity: quantity,
-            },
-        });
-    });
-
-    table.find(".button-buy").click(function() {
-        var pk = $(this).attr('pk');
-
-        launchModalForm("{% url 'order-parts' %}", {
-            data: {
-                parts: [pk],
-            },
-        });
-    });
-
-    $(".button-price").click(function() {
-        var pk = $(this).attr('pk');
-        var idx = $(this).closest('tr').attr('data-index');
-        var row = table.bootstrapTable('getData')[idx];
-
-        launchModalForm(
-            "{% url 'line-pricing' %}",
-            {
-                submit_text: '{% trans "Calculate price" %}',
-                data: {
-                    line_item: pk,
-                    quantity: row.quantity,
-                },
-                buttons: [{name: 'update_price',
-                    title: '{% trans "Update Unit Price" %}'},],
-                success: reloadTable,
-            }
-        );
-    });
-
-    attachNavCallbacks({
-        name: 'sales-order',
-        default: 'order-items'
-    });
-}
-
-function additionalreloadTable() {
-    $("#so-additional-lines-table").bootstrapTable("refresh");
-    reloadTotal();
-}
-
-
-$("#so-additional-lines-table").inventreeTable({
-    formatNoMatches: function() { return "{% trans 'No matching lines' %}"; },
-    queryParams: {
-        order: {{ order.id }},
-    },
-    sidePagination: 'server',
-    uniqueId: 'pk',
-    url: "{% url 'api-so-additional-line-list' %}",
-    onPostBody: additionalSetupCallbacks,
-    showFooter: true,
-    columns: [
-        {
-            field: 'pk',
-            title: '{% trans "ID" %}',
-            visible: false,
-            switchable: false,
-        },
-        {
-            sortable: true,
-            field: 'title',
-            title: '{% trans "Title" %}',
-            footerFormatter:  function() {
-                return '{% trans "Total" %}'
-            },
-        },
-        {
-            sortable: true,
-            field: 'reference',
-            title: '{% trans "Reference" %}'
-        },
-        {
-            sortable: true,
-            field: 'quantity',
-            title: '{% trans "Quantity" %}',
-            footerFormatter: function(data) {
-                return data.map(function (row) {
-                  return +row['quantity']
-                }).reduce(function (sum, i) {
-                  return sum + i
-                }, 0)
-            },
-        },
-        {
-            sortable: true,
-            field: 'sale_price',
-            title: '{% trans "Unit Price" %}',
-            formatter: function(value, row) {
-                return row.sale_price_string || row.sale_price;
-            }
-        },
-        {
-            sortable: true,
-            title: '{% trans "Total price" %}',
-            formatter: function(value, row) {
-                var total = row.sale_price * row.quantity;
-                var formatter = new Intl.NumberFormat('en-US', {style: 'currency', currency: row.sale_price_currency});
-                return formatter.format(total)
-            },
-            footerFormatter: function(data) {
-                var total = data.map(function (row) {
-                  return +row['sale_price_converted']*row['quantity']
-                }).reduce(function (sum, i) {
-                  return sum + i
-                }, 0)
-                var currency = (data.slice(-1)[0] && data.slice(-1)[0].sale_price_converted_currency)  || 'USD';
-                var formatter = new Intl.NumberFormat('en-US', {style: 'currency', currency: currency});
-                return formatter.format(total)
-              }
-        },
-        {
-            field: 'notes',
-            title: '{% trans "Notes" %}',
-        },
-        {% if order.status == SalesOrderStatus.PENDING %}
-        {
-            field: 'buttons',
-            formatter: function(value, row, index, field) {
-
-                var html = `<div class='btn-group float-right' role='group'>`;
-                var pk = row.pk;
-
-                html += makeIconButton('fa-edit icon-blue', 'button-edit', pk, '{% trans "Edit line item" %}');
-                html += makeIconButton('fa-trash-alt icon-red', 'button-delete', pk, '{% trans "Delete line item " %}');
-
-                html += `</div>`;
-
-                return html;
-            }
-        },
-        {% endif %}
-    ],
-});
-
-function additionalSetupCallbacks() {
-
-    var table = $("#so-additional-lines-table");
-
-    // Set up callbacks for the row buttons
-    table.find(".button-edit").click(function() {
-
-        var pk = $(this).attr('pk');
-
-        constructForm(`/api/order/so-add-line/${pk}/`, {
-            fields: {
-                title: {},
-                quantity: {},
-                reference: {},
-                sale_price: {},
-                sale_price_currency: {},
-                notes: {},
-            },
-            title: '{% trans "Edit Line Item" %}',
-            onSuccess: additionalreloadTable,
-        });
-    });
-
-    table.find(".button-delete").click(function() {
-        var pk = $(this).attr('pk');
-
-        constructForm(`/api/order/so-add-line/${pk}/`, {
-            method: 'DELETE',
-            title: '{% trans "Delete Line Item" %}',
-            onSuccess: additionalreloadTable,
-        });
-    });
-
-}
-
-$("#new-add-so-line").click(function() {
-
-    constructForm('{% url "api-so-additional-line-list" %}', {
-        fields: {
-            order: {
-                value: {{ order.pk }},
-                hidden: true,
-            },
-            title: {},
-            quantity: {},
-            reference: {},
-            sale_price: {},
-            sale_price_currency: {},
-            notes: {},
-        },
-        method: 'POST',
-        title: '{% trans "Add Line" %}',
-        onSuccess: additionalreloadTable,
-    });
-});
-
+    enableSidebar('salesorder');
+    
 {% endblock %}

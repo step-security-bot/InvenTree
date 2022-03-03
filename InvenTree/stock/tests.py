@@ -342,6 +342,7 @@ class StockTest(TestCase):
         # Take 25 units from w2 (will be deleted)
         w2.take_stock(30, None, notes='Took 30')
 
+        # This StockItem should now have been deleted
         with self.assertRaises(StockItem.DoesNotExist):
             w2 = StockItem.objects.get(pk=101)
 

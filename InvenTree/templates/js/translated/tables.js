@@ -1,29 +1,96 @@
 {% load i18n %}
 
+/* global
+    inventreeLoad,
+    inventreeSave,
+*/
 
+/* exported
+    customGroupSorter,
+    downloadTableData,
+    reloadtable,
+    renderLink,
+    reloadTableFilters,
+*/
+
+/**
+ * Reload a named table
+ * @param table 
+ */
 function reloadtable(table) {
     $(table).bootstrapTable('refresh');
 }
 
 
-function editButton(url, text='Edit') {
-    return "<button class='btn btn-success edit-button btn-sm' type='button' url='" + url + "'>" + text + "</button>";
+/**
+ * Download data from a table, via the API.
+ * This requires a number of conditions to be met:
+ * 
+ * - The API endpoint supports data download (on the server side)
+ * - The table is "flat" (does not support multi-level loading, etc)
+ * - The table has been loaded using the inventreeTable() function, not bootstrapTable()
+ *   (Refer to the "reloadTableFilters" function to see why!)
+ */
+function downloadTableData(table, opts={}) {
+
+    // Extract table configuration options
+    var table_options = table.bootstrapTable('getOptions');
+
+    var url = table_options.url;
+
+    if (!url) {
+        console.log('Error: downloadTableData could not find "url" parameter.');
+    }
+
+    var query_params = table_options.query_params || {};
+
+    url += '?';
+
+    constructFormBody({}, {
+        title: opts.title || '{% trans "Export Table Data" %}',
+        fields: {
+            format: {
+                label: '{% trans "Format" %}',
+                help_text: '{% trans "Select File Format" %}',
+                required: true,
+                type: 'choice',
+                value: 'csv',
+                choices: exportFormatOptions(),
+            }
+        },
+        onSubmit: function(fields, form_options) {
+            var format = getFormFieldValue('format', fields['format'], form_options);
+            
+            // Hide the modal
+            $(form_options.modal).modal('hide');
+
+            for (const [key, value] of Object.entries(query_params)) {
+                url += `${key}=${value}&`;
+            }
+        
+            url += `export=${format}`;
+        
+            location.href = url;
+        }
+    });
 }
 
 
-function deleteButton(url, text='Delete') {
-    return "<button class='btn btn-danger delete-button btn-sm' type='button' url='" + url + "'>" + text + "</button>";
-}
 
 
+/**
+ * Render a URL for display
+ * @param {String} text 
+ * @param {String} url 
+ * @param {object} options 
+ * @returns link text
+ */
 function renderLink(text, url, options={}) {
     if (url === null || url === undefined || url === '') {
         return text;
     }
 
     var max_length = options.max_length || -1;
-
-    var remove_http = options.remove_http || false;
 
     // Shorten the displayed length if required
     if ((max_length > 0) && (text.length > max_length)) {
@@ -46,10 +113,10 @@ function enableButtons(elements, enabled) {
 }
 
 
+/* Link a bootstrap-table object to one or more buttons.
+ * The buttons will only be enabled if there is at least one row selected
+ */
 function linkButtonsToSelection(table, buttons) {
-    /* Link a bootstrap-table object to one or more buttons.
-     * The buttons will only be enabled if there is at least one row selected
-     */
 
     if (typeof table === 'string') {
         table = $(table);
@@ -59,12 +126,17 @@ function linkButtonsToSelection(table, buttons) {
     enableButtons(buttons, table.bootstrapTable('getSelections').length > 0);
 
     // Add a callback
-    table.on('check.bs.table uncheck.bs.table check-some.bs.table uncheck-some.bs.table check-all.bs.table uncheck-all.bs.table', function(row) {
+    table.on('check.bs.table uncheck.bs.table check-some.bs.table uncheck-some.bs.table check-all.bs.table uncheck-all.bs.table', function() {
         enableButtons(buttons, table.bootstrapTable('getSelections').length > 0);
     });
 }
 
 
+/**
+ * Returns true if the input looks like a valid number
+ * @param {String} n 
+ * @returns 
+ */
 function isNumeric(n) {
     return !isNaN(parseFloat(n)) && isFinite(n);
 }
@@ -88,8 +160,8 @@ function reloadTableFilters(table, filters) {
     // Construct a new list of filters to use for the query
     var params = {};
 
-    for (var key in filters) {
-        params[key] = filters[key];
+    for (var k in filters) {
+        params[k] = filters[k];
     }
 
     // Original query params will override
@@ -98,6 +170,10 @@ function reloadTableFilters(table, filters) {
             params[key] = options.original[key];
         }
     }
+
+    // Store the total set of query params
+    // This is necessary for the "downloadTableData" function to work
+    options.query_params = params;
 
     options.queryParams = function(tableParams) {
         return convertQueryParameters(tableParams, params);
@@ -136,7 +212,6 @@ function convertQueryParameters(params, filters) {
         var ordering = params['sort'] || null;
 
         if (ordering) {
-
             if (order == 'desc') {
                 ordering = `-${ordering}`;
             }
@@ -167,6 +242,15 @@ function convertQueryParameters(params, filters) {
     if ('sortable' in params) {
         delete params['sortable'];
     }
+
+    // If "original_search" parameter is provided, add it to the "search"
+    if ('original_search' in params) {
+        var search = params['search'] || '';
+
+        params['search'] = search + ' ' + params['original_search'];
+
+        delete params['original_search'];
+    }
     
     return params;
 }
@@ -191,12 +275,18 @@ $.fn.inventreeTable = function(options) {
         options.pageList = [25, 50, 100, 250, 'all'];
         options.totalField = 'count';
         options.dataField = 'results';
+    } else {
+        options.pagination = false;
     }
 
     // Extract query params
     var filters = options.queryParams || options.filters || {};
 
+    // Store the total set of query params
+    options.query_params = filters;
+
     options.queryParams = function(params) {
+        // Update the query parameters callback with the *new* filters
         return convertQueryParameters(params, filters);
     };
 
@@ -220,7 +310,7 @@ $.fn.inventreeTable = function(options) {
     };
 
     // Callback when a column is changed
-    options.onColumnSwitch = function(field, checked) {
+    options.onColumnSwitch = function() {
 
         var columns = table.bootstrapTable('getVisibleColumns');
 
@@ -239,7 +329,7 @@ $.fn.inventreeTable = function(options) {
 
     // If a set of visible columns has been saved, load!
     if (visibleColumns) {
-        var columns = visibleColumns.split(",");
+        var columns = visibleColumns.split(',');
 
         // Which columns are currently visible?
         var visible = table.bootstrapTable('getVisibleColumns');
@@ -253,7 +343,7 @@ $.fn.inventreeTable = function(options) {
                 }
             });
         } else {
-            console.log('Could not get list of visible columns!');
+            console.log(`Could not get list of visible columns for table '${tableName}'`);
         }
     }
 
@@ -261,7 +351,8 @@ $.fn.inventreeTable = function(options) {
     if (options.buttons) {
         linkButtonsToSelection(table, options.buttons);
     }
-}
+};
+
 
 function customGroupSorter(sortName, sortOrder, sortData) {
 
@@ -334,42 +425,52 @@ function customGroupSorter(sortName, sortOrder, sortData) {
 }
 
 // Expose default bootstrap table string literals to translation layer
-(function ($) {
+(function($) {
     'use strict';
 
     $.fn.bootstrapTable.locales['en-US-custom'] = {
-        formatLoadingMessage: function () {
+        formatLoadingMessage: function() {
             return '{% trans "Loading data" %}';
         },
-        formatRecordsPerPage: function (pageNumber) {
+        formatRecordsPerPage: function(pageNumber) {
             return `${pageNumber} {% trans "rows per page" %}`;
         },
-        formatShowingRows: function (pageFrom, pageTo, totalRows) {
-            return `{% trans "Showing" %} ${pageFrom} {% trans "to" %} ${pageTo} {% trans "of" %} ${totalRows} {% trans "rows" %}`;
+        formatShowingRows: function(pageFrom, pageTo, totalRows) {
+
+            if (totalRows === undefined || totalRows === NaN) {
+                return '{% trans "Showing all rows" %}';
+            } else {
+                return `{% trans "Showing" %} ${pageFrom} {% trans "to" %} ${pageTo} {% trans "of" %} ${totalRows} {% trans "rows" %}`;
+            }
         },
-        formatSearch: function () {
+        formatSearch: function() {
             return '{% trans "Search" %}';
         },
-        formatNoMatches: function () {
+        formatNoMatches: function() {
             return '{% trans "No matching results" %}';
         },
-        formatPaginationSwitch: function () {
+        formatPaginationSwitch: function() {
             return '{% trans "Hide/Show pagination" %}';
         },
-        formatRefresh: function () {
+        formatRefresh: function() {
             return '{% trans "Refresh" %}';
         },
-        formatToggle: function () {
+        formatToggle: function() {
             return '{% trans "Toggle" %}';
         },
-        formatColumns: function () {
+        formatColumns: function() {
             return '{% trans "Columns" %}';
         },
-        formatAllRows: function () {
+        formatAllRows: function() {
             return '{% trans "All" %}';
-        }
+        },
     };
 
     $.extend($.fn.bootstrapTable.defaults, $.fn.bootstrapTable.locales['en-US-custom']);
 
 })(jQuery);
+
+$.extend($.fn.treegrid.defaults, {
+    expanderExpandedClass: 'treegrid-expander-expanded',
+    expanderCollapsedClass: 'treegrid-expander-collapsed'
+});

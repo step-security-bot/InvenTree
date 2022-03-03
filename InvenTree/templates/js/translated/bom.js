@@ -1,11 +1,357 @@
 {% load i18n %}
 
-/* BOM management functions.
- * Requires follwing files to be loaded first:
- * - api.js
- * - part.js
- * - modals.js
+/* globals
+    constructForm,
+    exportFormatOptions,
+    imageHoverIcon,
+    inventreeGet,
+    inventreePut,
+    launchModalForm,
+    loadTableFilters,
+    makePartIcons,
+    renderLink,
+    setupFilterList,
+    yesNoLabel,
+*/
+
+/* exported
+    constructBomUploadTable,
+    downloadBomTemplate,
+    exportBom,
+    newPartFromBomWizard,
+    loadBomTable,
+    loadUsedInTable,
+    removeRowFromBomWizard,
+    removeColFromBomWizard,
+    submitBomTable
+*/
+
+
+/* Construct a table of data extracted from a BOM file.
+ * This data is used to import a BOM interactively.
  */
+function constructBomUploadTable(data, options={}) {
+
+    if (!data.rows) {
+        // TODO: Error message!
+        return;
+    }
+
+    function constructRow(row, idx, fields) {
+        // Construct an individual row from the provided data
+
+        var field_options = {
+            hideLabels: true,
+            hideClearButton: true,
+            form_classes: 'bom-form-group',
+        };
+
+        function constructRowField(field_name) {
+
+            var field = fields[field_name] || null;
+
+            if (!field) {
+                return `Cannot render field '${field_name}`;
+            }
+
+            field.value = row.data[field_name];
+
+            return constructField(`items_${field_name}_${idx}`, field, field_options);
+
+        }
+
+        // Construct form inputs
+        var sub_part = constructRowField('sub_part');
+        var quantity = constructRowField('quantity');
+        var reference = constructRowField('reference');
+        var overage = constructRowField('overage');
+        var variants = constructRowField('allow_variants');
+        var inherited = constructRowField('inherited');
+        var optional = constructRowField('optional');
+        var note = constructRowField('note');
+
+        var buttons = `<div class='btn-group float-right' role='group'>`;
+
+        buttons += makeIconButton('fa-info-circle', 'button-row-data', idx, '{% trans "Display row data" %}');
+        buttons += makeIconButton('fa-times icon-red', 'button-row-remove', idx, '{% trans "Remove row" %}');
+
+        buttons += `</div>`;
+
+        var html = `
+        <tr id='items_${idx}' class='bom-import-row' idx='${idx}'>
+            <td id='col_sub_part_${idx}'>${sub_part}</td>
+            <td id='col_quantity_${idx}'>${quantity}</td>
+            <td id='col_reference_${idx}'>${reference}</td>
+            <td id='col_overage_${idx}'>${overage}</td>
+            <td id='col_variants_${idx}'>${variants}</td>
+            <td id='col_inherited_${idx}'>${inherited}</td>
+            <td id='col_optional_${idx}'>${optional}</td>
+            <td id='col_note_${idx}'>${note}</td>
+            <td id='col_buttons_${idx}'>${buttons}</td>
+        </tr>`;
+
+        $('#bom-import-table tbody').append(html);
+
+        // Handle any errors raised by initial data import
+        if (row.data.errors.part) {
+            addFieldErrorMessage(`items_sub_part_${idx}`, row.data.errors.part);   
+        }
+
+        if (row.data.errors.quantity) {
+            addFieldErrorMessage(`items_quantity_${idx}`, row.data.errors.quantity);
+        }
+
+        // Initialize the "part" selector for this row
+        initializeRelatedField(
+            {
+                name: `items_sub_part_${idx}`,
+                value: row.data.part,
+                api_url: '{% url "api-part-list" %}',
+                filters: {
+                    component: true,
+                },
+                model: 'part',
+                required: true,
+                auto_fill: false,
+                onSelect: function(data, field, opts) {
+                    // TODO?
+                },
+            }
+        );
+
+        // Add callback for "remove row" button
+        $(`#button-row-remove-${idx}`).click(function() {
+            $(`#items_${idx}`).remove();
+        });
+
+        // Add callback for "show data" button
+        $(`#button-row-data-${idx}`).click(function() {
+
+            var modal = createNewModal({
+                title: '{% trans "Row Data" %}',
+                cancelText: '{% trans "Close" %}',
+                hideSubmitButton: true
+            });
+
+            // Prettify the original import data
+            var pretty = JSON.stringify(
+                {
+                    columns: data.columns,
+                    row: row.original,
+                }, undefined, 4
+            );
+
+            var html = `
+            <div class='alert alert-block'>
+            <pre><code>${pretty}</code></pre>
+            </div>`;
+
+            modalSetContent(modal, html);
+
+            $(modal).modal('show');
+
+        });
+    }
+
+    // Request API endpoint options
+    getApiEndpointOptions('{% url "api-bom-list" %}', function(response) {
+        
+        var fields = response.actions.POST;
+
+        data.rows.forEach(function(row, idx) {
+            constructRow(row, idx, fields);
+        });
+    });
+}
+
+
+/* Extract rows from the BOM upload table,
+ * and submit data to the server
+ */
+function submitBomTable(part_id, options={}) {
+
+    // Extract rows from the form
+    var rows = [];
+
+    var idx_values = [];
+
+    var url = '{% url "api-bom-import-submit" %}';
+
+    $('.bom-import-row').each(function() {
+        var idx = $(this).attr('idx');
+
+        idx_values.push(idx);
+
+        // Extract each field from the row
+        rows.push({
+            part: part_id,
+            sub_part: getFormFieldValue(`items_sub_part_${idx}`, {}),
+            quantity: getFormFieldValue(`items_quantity_${idx}`, {}),
+            reference: getFormFieldValue(`items_reference_${idx}`, {}),
+            overage: getFormFieldValue(`items_overage_${idx}`, {}),
+            allow_variants: getFormFieldValue(`items_allow_variants_${idx}`, {type: 'boolean'}),
+            inherited: getFormFieldValue(`items_inherited_${idx}`, {type: 'boolean'}),
+            optional: getFormFieldValue(`items_optional_${idx}`, {type: 'boolean'}),
+            note: getFormFieldValue(`items_note_${idx}`, {}),
+        });
+    });
+
+    var data = {
+        items: rows,
+    };
+
+    var options = {
+        nested: {
+            items: idx_values,
+        }
+    };
+
+    getApiEndpointOptions(url, function(response) {
+        var fields = response.actions.POST;
+
+        // Disable the "Submit BOM" button
+        $('#bom-submit').prop('disabled', true);
+        $('#bom-submit-icon').show();
+
+        inventreePut(url, data, {
+            method: 'POST',
+            success: function(response) {
+                window.location.href = `/part/${part_id}/?display=bom`;
+            },
+            error: function(xhr) {
+                switch (xhr.status) {
+                case 400:
+                    handleFormErrors(xhr.responseJSON, fields, options);
+                    break;
+                default:
+                    showApiError(xhr, url);
+                    break;
+                }
+
+                // Re-enable the submit button
+                $('#bom-submit').prop('disabled', false);
+                $('#bom-submit-icon').hide();
+            }
+        });
+    });
+}
+
+
+function downloadBomTemplate(options={}) {
+
+    var format = options.format;
+
+    if (!format) {
+        format = inventreeLoad('bom-export-format', 'csv');
+    }
+
+    constructFormBody({}, {
+        title: '{% trans "Download BOM Template" %}',
+        fields: {
+            format: {
+                label: '{% trans "Format" %}',
+                help_text: '{% trans "Select file format" %}',
+                required: true,
+                type: 'choice',
+                value: format,
+                choices: exportFormatOptions(),
+            }
+        },
+        onSubmit: function(fields, opts) {
+            var format = getFormFieldValue('format', fields['format'], opts);
+
+            // Save the format for next time
+            inventreeSave('bom-export-format', format);
+
+            // Hide the modal
+            $(opts.modal).modal('hide');
+
+            // Download the file
+            location.href = `{% url "bom-upload-template" %}?format=${format}`;
+
+        }
+    });
+}
+
+
+/**
+ * Export BOM (Bill of Materials) for the specified Part instance
+ */
+function exportBom(part_id, options={}) {
+
+    constructFormBody({}, {
+        title: '{% trans "Export BOM" %}',
+        fields: {
+            format: {
+                label: '{% trans "Format" %}',
+                help_text: '{% trans "Select file format" %}',
+                required: true,
+                type: 'choice',
+                value: inventreeLoad('bom-export-format', 'csv'),
+                choices: exportFormatOptions(),
+            },
+            cascade: {
+                label: '{% trans "Cascading" %}',
+                help_text: '{% trans "Download cascading / multi-level BOM" %}',
+                type: 'boolean',
+                value: inventreeLoad('bom-export-cascading', true),
+            },
+            levels: {
+                label: '{% trans "Levels" %}',
+                help_text: '{% trans "Select maximum number of BOM levels to export (0 = all levels)" %}',
+                type: 'integer',
+                value: 0,
+                min_value: 0,
+            },
+            parameter_data: {
+                label: '{% trans "Include Parameter Data" %}',
+                help_text: '{% trans "Include part  parameter data in exported BOM" %}',
+                type: 'boolean',
+                value: inventreeLoad('bom-export-parameter_data', false),
+            },
+            stock_data: {
+                label: '{% trans "Include Stock Data" %}',
+                help_text: '{% trans "Include part stock data in exported BOM" %}',
+                type: 'boolean',
+                value: inventreeLoad('bom-export-stock_data', false),
+            },
+            manufacturer_data: {
+                label: '{% trans "Include Manufacturer Data" %}',
+                help_text: '{% trans "Include part manufacturer data in exported BOM" %}',
+                type: 'boolean',
+                value: inventreeLoad('bom-export-manufacturer_data', false),
+            },
+            supplier_data: {
+                label: '{% trans "Include Supplier Data" %}',
+                help_text: '{% trans "Include part supplier data in exported BOM" %}',
+                type: 'boolean',
+                value: inventreeLoad('bom-export-supplier_data', false),
+            }
+        },
+        onSubmit: function(fields, opts) {
+
+            // Extract values from the form
+            var field_names = ['format', 'cascade', 'levels', 'parameter_data', 'stock_data', 'manufacturer_data', 'supplier_data'];
+
+            var url = `/part/${part_id}/bom-download/?`;
+
+            field_names.forEach(function(fn) {
+                var val = getFormFieldValue(fn, fields[fn], opts);
+
+                // Update user preferences
+                inventreeSave(`bom-export-${fn}`, val);
+
+                url += `${fn}=${val}&`;
+            });
+
+            $(opts.modal).modal('hide');
+
+            // Redirect to the BOM file download
+            location.href = url;
+        }
+    });
+
+}
 
 
 function bomItemFields() {
@@ -15,6 +361,18 @@ function bomItemFields() {
             hidden: true,
         },
         sub_part: {
+            secondary: {
+                title: '{% trans "New Part" %}',
+                fields: function() {
+                    var fields = partFields();
+
+                    // Set to a "component" part
+                    fields.component.value = true;
+
+                    return fields;
+                },
+                groups: partGroups(),
+            }
         },
         quantity: {},
         reference: {},
@@ -28,7 +386,7 @@ function bomItemFields() {
 }
 
 
-function reloadBomTable(table, options) {
+function reloadBomTable(table) {
 
     table.bootstrapTable('refresh');
 }
@@ -111,7 +469,189 @@ function newPartFromBomWizard(e) {
 }
 
 
-function loadBomTable(table, options) {
+/*
+ * Launch a modal dialog displaying the "substitute parts" for a particular BomItem
+ *
+ * If editable, allows substitutes to be added and deleted
+ */
+function bomSubstitutesDialog(bom_item_id, substitutes, options={}) {
+
+    // Reload data for the parent table
+    function reloadParentTable() {
+        if (options.table) {
+            options.table.bootstrapTable('refresh');
+        }
+    }
+
+    // Extract a list of all existing "substitute" id values
+    function getSubstituteIdValues(modal) {
+
+        var id_values = [];
+
+        $(modal).find('.substitute-row').each(function(el) {
+            var part = $(this).attr('part');
+            id_values.push(part);
+        });
+
+        return id_values;
+    }
+
+    function renderSubstituteRow(substitute) {
+
+        var pk = substitute.pk;
+
+        var part = substitute.part_detail;
+
+        var thumb = thumbnailImage(part.thumbnail || part.image);
+
+        var buttons = '';
+
+        buttons += makeIconButton('fa-times icon-red', 'button-row-remove', pk, '{% trans "Remove substitute part" %}');
+
+        // Render a single row
+        var html = `
+        <tr id='substitute-row-${pk}' class='substitute-row' part='${substitute.part}'>
+            <td id='part-${pk}'>
+                <a href='/part/${part.pk}/'>
+                    ${thumb} ${part.full_name}
+                </a>
+            </td>
+            <td id='description-${pk}'><em>${part.description}</em></td>
+            <td id='stock-${pk}'><em>${part.stock}</em></td>
+            <td>${buttons}</td>
+        </tr>
+        `;
+
+        return html;
+    }
+
+    // Construct a table to render the rows
+    var rows = '';
+
+    substitutes.forEach(function(sub) {
+        rows += renderSubstituteRow(sub);
+    });
+
+    var part_thumb = thumbnailImage(options.sub_part_detail.thumbnail || options.sub_part_detail.image);
+    var part_name = options.sub_part_detail.full_name;
+    var part_desc = options.sub_part_detail.description;
+
+    var html = `
+    <div class='alert alert-block'>
+    <strong>{% trans "Base Part" %}</strong><hr>
+    ${part_thumb} ${part_name} - <em>${part_desc}</em>
+    </div>
+    `;
+    
+    // Add a table of individual rows
+    html += `
+    <table class='table table-striped table-condensed' id='substitute-table'>
+        <thead>
+            <tr>
+                <th>{% trans "Part" %}</th>
+                <th>{% trans "Description" %}</th>
+                <th>{% trans "Stock" %}</th>
+                <th><!-- Actions --></th>
+            </tr>
+        </thead>
+        <tbody>
+            ${rows}
+        </tbody>
+    </table>
+    `;
+
+    html += `
+    <div class='alert alert-success alert-block'>
+        {% trans "Select and add a new substitute part using the input below" %}
+    </div>
+    `;
+
+    // Add a callback to remove a row from the table
+    function addRemoveCallback(modal, element) {
+        $(modal).find(element).click(function() {
+            var pk = $(this).attr('pk');
+
+            var pre = `
+            <div class='alert alert-block alert-warning'>
+            {% trans "Are you sure you wish to remove this substitute part link?" %}
+            </div>
+            `;
+
+            constructForm(`/api/bom/substitute/${pk}/`, {
+                method: 'DELETE',
+                title: '{% trans "Remove Substitute Part" %}',
+                preFormContent: pre,
+                confirm: true,
+                onSuccess: function() {
+                    $(modal).find(`#substitute-row-${pk}`).remove();
+                    reloadParentTable();
+                }
+            });
+        });
+    }
+
+    constructForm('{% url "api-bom-substitute-list" %}', {
+        method: 'POST',
+        fields: {
+            bom_item: {
+                hidden: true,
+                value: bom_item_id,
+            },
+            part: {
+                required: false,
+                adjustFilters: function(query, opts) {
+
+                    var subs = getSubstituteIdValues(opts.modal);
+
+                    // Also exclude the "master" part (if provided)
+                    if (options.sub_part) {
+                        subs.push(options.sub_part);
+                    }
+
+                    if (subs.length > 0) {
+                        query.exclude_id = subs;
+                    }
+
+                    return query;
+                }
+            },
+        },
+        preFormContent: html,
+        cancelText: '{% trans "Close" %}',
+        submitText: '{% trans "Add Substitute" %}',
+        title: '{% trans "Edit BOM Item Substitutes" %}',
+        afterRender: function(fields, opts) {
+            addRemoveCallback(opts.modal, '.button-row-remove');
+        },
+        preventClose: true,
+        onSuccess: function(response, opts) {
+
+            // Clear the form
+            var field = {
+                type: 'related field',
+            };
+
+            updateFieldValue('part', null, field, opts);
+
+            // Add the new substitute to the table
+            var row = renderSubstituteRow(response);
+            $(opts.modal).find('#substitute-table > tbody:last-child').append(row);
+
+            // Add a callback to the new button
+            addRemoveCallback(opts.modal, `#button-row-remove-${response.pk}`);
+
+            // Re-enable the "submit" button
+            $(opts.modal).find('#modal-form-submit').prop('disabled', false);
+            
+            // Reload the parent BOM table
+            reloadParentTable();
+        }
+    });
+
+}
+
+
+function loadBomTable(table, options={}) {
     /* Load a BOM table with some configurable options.
      * 
      * Following options are available:
@@ -126,7 +666,12 @@ function loadBomTable(table, options) {
     var params = {
         part: options.parent_id,
         ordering: 'name',
-    }
+    };
+
+    // Do we show part pricing in the BOM table?
+    var show_pricing = global_settings.PART_SHOW_PRICE_IN_BOM;
+
+    params.include_pricing = show_pricing == true;
 
     if (options.part_detail) {
         params.part_detail = true;
@@ -157,7 +702,7 @@ function loadBomTable(table, options) {
             checkbox: true,
             visible: true,
             switchable: false,
-            formatter: function(value, row, index, field) {
+            formatter: function(value, row) {
                 // Disable checkbox if the row is defined for a *different* part!
                 if (row.part != options.parent_id) {
                     return {
@@ -182,17 +727,25 @@ function loadBomTable(table, options) {
             field: 'sub_part',
             title: '{% trans "Part" %}',
             sortable: true,
-            formatter: function(value, row, index, field) {
+            formatter: function(value, row) {
                 var url = `/part/${row.sub_part}/`;
                 var html = imageHoverIcon(row.sub_part_detail.thumbnail) + renderLink(row.sub_part_detail.full_name, url);
 
                 var sub_part = row.sub_part_detail;
 
-                html += makePartIcons(row.sub_part_detail);
+                html += makePartIcons(sub_part);
+
+                if (row.substitutes && row.substitutes.length > 0) {
+                    html += makeIconBadge('fa-exchange-alt', '{% trans "Substitutes Available" %}');
+                }
+
+                if (row.allow_variants) {
+                    html += makeIconBadge('fa-sitemap', '{% trans "Variant stock allowed" %}');
+                }
 
                 // Display an extra icon if this part is an assembly
                 if (sub_part.assembly) {
-                    var text = `<span title='{% trans "Open subassembly" %}' class='fas fa-stream label-right'></span>`;
+                    var text = `<span title='{% trans "Open subassembly" %}' class='fas fa-stream float-right'></span>`;
 
                     html += renderLink(text, `/part/${row.sub_part}/bom/`);
                 }
@@ -225,7 +778,7 @@ function loadBomTable(table, options) {
         title: '{% trans "Quantity" %}',
         searchable: false,
         sortable: true,
-        formatter: function(value, row, index, field) {
+        formatter: function(value, row) {
             var text = value;
 
             // The 'value' is a text string with (potentially) multiple trailing zeros
@@ -244,54 +797,66 @@ function loadBomTable(table, options) {
         },
     });
 
-    cols.push(
-    {
+    cols.push({
         field: 'sub_part_detail.stock',
         title: '{% trans "Available" %}',
         searchable: false,
         sortable: true,
-        formatter: function(value, row, index, field) {
+        formatter: function(value, row) {
 
-            var url = `/part/${row.sub_part_detail.pk}/?display=stock`;
+            var url = `/part/${row.sub_part_detail.pk}/?display=part-stock`;
             var text = value;
 
             if (value == null || value <= 0) {
-                text = `<span class='label label-warning'>{% trans "No Stock" %}</span>`;
+                text = `<span class='badge rounded-pill bg-danger'>{% trans "No Stock" %}</span>`;
             }
 
             return renderLink(text, url);
         }
     });
-    
-    cols.push(
-    {
-        field: 'purchase_price_range',
-        title: '{% trans "Purchase Price Range" %}',
+
+    cols.push({
+        field: 'substitutes',
+        title: '{% trans "Substitutes" %}',
         searchable: false,
         sortable: true,
-    });
-
-    cols.push(
-    {
-        field: 'purchase_price_avg',
-        title: '{% trans "Purchase Price Average" %}',
-        searchable: false,
-        sortable: true,
-    });
-
-    cols.push(
-    {
-        field: 'price_range',
-        title: '{% trans "Supplier Cost" %}',
-        sortable: true,
-        formatter: function(value, row, index, field) {
-            if (value) {
-                return value;
+        formatter: function(value, row) {
+            if (row.substitutes && row.substitutes.length > 0) {
+                return row.substitutes.length;
             } else {
-                return "<span class='warning-msg'>{% trans 'No supplier pricing available' %}</span>";
+                return `-`;
             }
         }
     });
+    
+    if (show_pricing) {
+        cols.push({
+            field: 'purchase_price_range',
+            title: '{% trans "Purchase Price Range" %}',
+            searchable: false,
+            sortable: true,
+        });
+
+        cols.push({
+            field: 'purchase_price_avg',
+            title: '{% trans "Purchase Price Average" %}',
+            searchable: false,
+            sortable: true,
+        });
+
+        cols.push({
+            field: 'price_range',
+            title: '{% trans "Supplier Cost" %}',
+            sortable: true,
+            formatter: function(value) {
+                if (value) {
+                    return value;
+                } else {
+                    return `<span class='warning-msg'>{% trans 'No supplier pricing available' %}</span>`;
+                }
+            }
+        });
+    }
 
     cols.push({
         field: 'optional',
@@ -308,18 +873,18 @@ function loadBomTable(table, options) {
         formatter: function(value) {
             return yesNoLabel(value);
         }
-    })
+    });
 
     cols.push({
         field: 'inherited',
         title: '{% trans "Inherited" %}',
         searchable: false,
-        formatter: function(value, row, index, field) {
+        formatter: function(value, row) {
             // This BOM item *is* inheritable, but is defined for this BOM
             if (!row.inherited) {
                 return yesNoLabel(false);
             } else if (row.part == options.parent_id) {
-                return '{% trans "Inherited" %}';
+                return yesNoLabel(true);
             } else {
                 // If this BOM item is inherited from a parent part
                 return renderLink(
@@ -332,9 +897,9 @@ function loadBomTable(table, options) {
 
     cols.push(
         {
-            'field': 'can_build',
-            'title': '{% trans "Can Build" %}',
-            formatter: function(value, row, index, field) {
+            field: 'can_build',
+            title: '{% trans "Can Build" %}',
+            formatter: function(value, row) {
                 var can_build = 0;
 
                 if (row.quantity > 0) {
@@ -360,7 +925,7 @@ function loadBomTable(table, options) {
             },
             sortable: true,
         }
-    )
+    );
 
     // Part notes
     cols.push(
@@ -379,22 +944,21 @@ function loadBomTable(table, options) {
             switchable: false,
             field: 'pk',
             visible: true,
-            formatter: function(value, row, index, field) {
+            formatter: function(value, row) {
 
                 if (row.part == options.parent_id) {
 
-                    var bValidate = `<button title='{% trans "Validate BOM Item" %}' class='bom-validate-button btn btn-default btn-glyph' type='button' pk='${row.pk}'><span class='fas fa-check-circle icon-blue'/></button>`;
+                    var bValidate = makeIconButton('fa-check-circle icon-green', 'bom-validate-button', row.pk, '{% trans "Validate BOM Item" %}');
 
-                    var bValid = `<span title='{% trans "This line has been validated" %}' class='fas fa-check-double icon-green'/>`;
+                    var bValid = makeIconButton('fa-check-double icon-green', 'bom-valid-button', row.pk, '{% trans "This line has been validated" %}', {disabled: true});
 
-                    var bEdit = `<button title='{% trans "Edit BOM Item" %}' class='bom-edit-button btn btn-default btn-glyph' type='button' pk='${row.pk}'><span class='fas fa-edit'></span></button>`;
+                    var bSubs = makeIconButton('fa-exchange-alt icon-blue', 'bom-substitutes-button', row.pk, '{% trans "Edit substitute parts" %}');
 
-                    var bDelt = `<button title='{% trans "Delete BOM Item" %}' class='bom-delete-button btn btn-default btn-glyph' type='button' pk='${row.pk}'><span class='fas fa-trash-alt icon-red'></span></button>`;
+                    var bEdit = makeIconButton('fa-edit icon-blue', 'bom-edit-button', row.pk, '{% trans "Edit BOM Item" %}');
 
-                    var html = "<div class='btn-group' role='group'>";
+                    var bDelt = makeIconButton('fa-trash-alt icon-red', 'bom-delete-button', row.pk, '{% trans "Delete BOM Item" %}');
 
-                    html += bEdit;
-                    html += bDelt;
+                    var html = `<div class='btn-group float-right' role='group' style='min-width: 100px;'>`;
 
                     if (!row.validated) {
                         html += bValidate;
@@ -402,7 +966,11 @@ function loadBomTable(table, options) {
                         html += bValid;
                     }
 
-                    html += "</div>";
+                    html += bEdit;
+                    html += bSubs;
+                    html += bDelt;
+
+                    html += `</div>`;
 
                     return html;
                 } else {
@@ -419,47 +987,62 @@ function loadBomTable(table, options) {
 
     // Function to request BOM data for sub-items
     // This function may be called recursively for multi-level BOMs
-    function requestSubItems(bom_pk, part_pk) {
+    function requestSubItems(bom_pk, part_pk, depth=0) {
+
+        // Prevent multi-level recursion
+        const MAX_BOM_DEPTH = 25;
+
+        if (depth >= MAX_BOM_DEPTH) {
+            console.log(`Maximum BOM depth (${MAX_BOM_DEPTH}) reached!`);
+            return;
+        }
 
         inventreeGet(
             options.bom_url,
             {
                 part: part_pk,
                 sub_part_detail: true,
+                include_pricing: show_pricing == true,
             },
             {
                 success: function(response) {
+
+                    // Add the returned sub-items to the table
                     for (var idx = 0; idx < response.length; idx++) {
-
                         response[idx].parentId = bom_pk;
-
-                        if (response[idx].sub_part_detail.assembly) {
-                            requestSubItems(response[idx].pk, response[idx].sub_part)
-                        }
                     }
-
+                    
                     table.bootstrapTable('append', response);
+
+                    // Next, re-iterate and check if the new items also have sub items
+                    response.forEach(function(bom_item) {
+                        if (bom_item.sub_part_detail.assembly) {
+                            requestSubItems(bom_item.pk, bom_item.sub_part, depth + 1);
+                        }
+                    });
 
                     table.treegrid('collapseAll');
                 },
-                error: function() {
+                error: function(xhr) {
                     console.log('Error requesting BOM for part=' + part_pk);
+                    showApiError(xhr);
                 }
             }
-        )
+        );
     }
 
     table.inventreeTable({
-        treeEnable: !options.editable,
+        treeEnable: true,
         rootParentId: parent_id,
         idField: 'pk',
+        uniqueId: 'pk',
         parentIdField: 'parentId',
         treeShowField: 'sub_part',
         showColumns: true,
         name: 'bom',
         sortable: true,
         search: true,
-        rowStyle: function(row, index) {
+        rowStyle: function(row) {
 
             var classes = [];
 
@@ -489,38 +1072,37 @@ function loadBomTable(table, options) {
         url: options.bom_url,
         onPostBody: function() {
 
-            if (!options.editable) {
-                table.treegrid({
-                    treeColumn: 0,
-                    onExpand: function() {
-                    }
-                });
-            }
+            table.treegrid({
+                treeColumn: 1,
+                onExpand: function() {
+                }
+            });
+
+            table.treegrid('collapseAll');
         },
         onLoadSuccess: function() {
 
             if (options.editable) {
                 table.bootstrapTable('uncheckAll');
-            } else {
+            }
 
-                var data = table.bootstrapTable('getData');
+            var data = table.bootstrapTable('getData');
 
-                for (var idx = 0; idx < data.length; idx++) {
-                    var row = data[idx];
+            for (var idx = 0; idx < data.length; idx++) {
+                var row = data[idx];
 
-                    // If a row already has a parent ID set, it's already been updated!
-                    if (row.parentId) {
-                        continue;
-                    }
+                // If a row already has a parent ID set, it's already been updated!
+                if (row.parentId) {
+                    continue;
+                }
 
-                    // Set the parent ID of the top-level rows
-                    row.parentId = parent_id;
+                // Set the parent ID of the top-level rows
+                row.parentId = parent_id;
 
-                    table.bootstrapTable('updateRow', idx, row, true);
+                table.bootstrapTable('updateRow', idx, row, true);
 
-                    if (row.sub_part_detail.assembly) {
-                        requestSubItems(row.pk, row.sub_part);
-                    }
+                if (row.sub_part_detail.assembly) {
+                    requestSubItems(row.pk, row.sub_part);
                 }
             }
         },
@@ -529,36 +1111,44 @@ function loadBomTable(table, options) {
     // In editing mode, attached editables to the appropriate table elements
     if (options.editable) {
 
+        // Callback for "delete" button
         table.on('click', '.bom-delete-button', function() {
 
             var pk = $(this).attr('pk');
-            var url = `/part/bom/${pk}/delete/`;
+
+            var html = `
+            <div class='alert alert-block alert-danger'>
+            {% trans "Are you sure you want to delete this BOM item?" %}
+            </div>`;
 
             constructForm(`/api/bom/${pk}/`, {
                 method: 'DELETE',
                 title: '{% trans "Delete BOM Item" %}',
+                preFormContent: html,
                 onSuccess: function() {
                     reloadBomTable(table);
                 }
             }); 
         });
 
+        // Callback for "edit" button
         table.on('click', '.bom-edit-button', function() {
 
             var pk = $(this).attr('pk');
-            var url = `/part/bom/${pk}/edit/`;
 
             var fields = bomItemFields();
 
             constructForm(`/api/bom/${pk}/`, {
                 fields: fields,
                 title: '{% trans "Edit BOM Item" %}',
+                focus: 'sub_part',
                 onSuccess: function() {
                     reloadBomTable(table);
                 }
             });
         });
 
+        // Callback for "validate" button
         table.on('click', '.bom-validate-button', function() {
 
             var pk = $(this).attr('pk');
@@ -577,5 +1167,187 @@ function loadBomTable(table, options) {
                 }
             );
         });
+
+        // Callback for "substitutes" button
+        table.on('click', '.bom-substitutes-button', function() {
+            var pk = $(this).attr('pk');
+
+            var row = table.bootstrapTable('getRowByUniqueId', pk);
+            var subs = row.substitutes || [];
+
+            bomSubstitutesDialog(
+                pk,
+                subs,
+                {
+                    table: table,
+                    part: row.part,
+                    sub_part: row.sub_part,
+                    sub_part_detail: row.sub_part_detail,
+                }
+            );
+        });
     }
+}
+
+
+/*
+ * Load a table which shows the assemblies which "require" a certain part.
+ *
+ * Arguments:
+ * - table: The ID string of the table element e.g. '#used-in-table'
+ * - part_id: The ID (PK) of the part we are interested in
+ * 
+ * Options:
+ * - 
+ * 
+ * The following "options" are available.
+ */
+function loadUsedInTable(table, part_id, options={}) {
+
+    var params = options.params || {};
+
+    params.uses = part_id;
+    params.part_detail = true;
+    params.sub_part_detail = true,
+    params.show_pricing = global_settings.PART_SHOW_PRICE_IN_BOM;
+
+    var filters = {};
+
+    if (!options.disableFilters) {
+        filters = loadTableFilters('usedin');
+    }
+
+    for (var key in params) {
+        filters[key] = params[key];
+    }
+
+    setupFilterList('usedin', $(table), options.filterTarget || '#filter-list-usedin');
+
+    function loadVariantData(row) {
+        // Load variants information for inherited BOM rows
+
+        inventreeGet(
+            '{% url "api-part-list" %}',
+            {
+                assembly: true,
+                ancestor: row.part,
+            },
+            {
+                success: function(variantData) {
+                    // Iterate through each variant item
+                    for (var jj = 0; jj < variantData.length; jj++) {
+                        variantData[jj].parent = row.pk;
+                        
+                        var variant = variantData[jj];
+
+                        // Add this variant to the table, augmented
+                        $(table).bootstrapTable('append', [{
+                            // Point the parent to the "master" assembly row 
+                            parent: row.pk,
+                            part: variant.pk,                       
+                            part_detail: variant,
+                            sub_part: row.sub_part,
+                            sub_part_detail: row.sub_part_detail,
+                            quantity: row.quantity,
+                        }]);
+                    }
+                },
+                error: function(xhr) {
+                    showApiError(xhr);
+                }
+            }
+        );
+    }
+
+    $(table).inventreeTable({
+        url: options.url || '{% url "api-bom-list" %}',
+        name: options.table_name || 'usedin',
+        sortable: true,
+        search: true,
+        showColumns: true,
+        queryParams: filters,
+        original: params,
+        rootParentId: 'top-level-item',
+        idField: 'pk',
+        uniqueId: 'pk',
+        parentIdField: 'parent',
+        treeShowField: 'part',
+        onLoadSuccess: function(tableData) {
+            // Once the initial data are loaded, check if there are any "inherited" BOM lines
+            for (var ii = 0; ii < tableData.length; ii++) {
+                var row = tableData[ii];
+
+                // This is a "top level" item in the table
+                row.parent = 'top-level-item';
+
+                // Ignore this row as it is not "inherited" by variant parts
+                if (!row.inherited) {
+                    continue;
+                }
+
+                loadVariantData(row);
+            }
+        },
+        onPostBody: function() {
+            $(table).treegrid({
+                treeColumn: 0,
+            });
+        },
+        columns: [
+            {
+                field: 'pk',
+                title: 'ID',
+                visible: false,
+                switchable: false,
+            },
+            {
+                field: 'part',
+                title: '{% trans "Assembly" %}',
+                switchable: false,
+                sortable: true,
+                formatter: function(value, row) {
+                    var url = `/part/${value}/?display=bom`;
+                    var html = '';
+
+                    var part = row.part_detail;
+
+                    html += imageHoverIcon(part.thumbnail);
+                    html += renderLink(part.full_name, url);
+                    html += makePartIcons(part);
+
+                    return html;
+                }
+            },
+            {
+                field: 'sub_part',
+                title: '{% trans "Required Part" %}',
+                sortable: true,
+                formatter: function(value, row) {
+                    var url = `/part/${value}/`;
+                    var html = '';
+
+                    var sub_part = row.sub_part_detail;
+
+                    html += imageHoverIcon(sub_part.thumbnail);
+                    html += renderLink(sub_part.full_name, url);
+                    html += makePartIcons(sub_part);
+
+                    return html;
+                }
+            },
+            {
+                field: 'quantity',
+                title: '{% trans "Required Quantity" %}',
+                formatter: function(value, row) {
+                    var html = value;
+
+                    if (row.parent && row.parent != 'top-level-item') {
+                        html += ` <em>({% trans "Inherited from parent BOM" %})</em>`;
+                    }
+
+                    return html;
+                }
+            }
+        ]
+    });
 }

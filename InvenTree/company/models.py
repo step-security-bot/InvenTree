@@ -94,6 +94,7 @@ class Company(models.Model):
         constraints = [
             UniqueConstraint(fields=['name', 'email'], name='unique_name_email_pair')
         ]
+        verbose_name_plural = "Companies"
 
     name = models.CharField(max_length=100, blank=False,
                             help_text=_('Company name'),
@@ -476,7 +477,7 @@ class SupplierPart(models.Model):
         return reverse('supplier-part-detail', kwargs={'pk': self.id})
 
     def api_instance_filters(self):
-        
+
         return {
             'manufacturer_part': {
                 'part': self.part.pk

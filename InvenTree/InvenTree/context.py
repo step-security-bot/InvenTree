@@ -23,7 +23,7 @@ def health_status(request):
 
     if request.path.endswith('.js'):
         # Do not provide to script requests
-        return {}
+        return {}  # pragma: no cover
 
     if hasattr(request, '_inventree_health_status'):
         # Do not duplicate efforts
@@ -36,9 +36,14 @@ def health_status(request):
         'email_configured': InvenTree.status.is_email_configured(),
     }
 
+    # The following keys are required to denote system health
+    health_keys = [
+        'django_q_running',
+    ]
+
     all_healthy = True
 
-    for k in status.keys():
+    for k in health_keys:
         if status[k] is not True:
             all_healthy = False
 

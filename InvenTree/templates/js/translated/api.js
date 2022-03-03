@@ -1,15 +1,27 @@
 {% load i18n %}
 {% load inventree_extras %}
 
-var jQuery = window.$;
+/* globals
+*/
 
-$.urlParam = function(name){
+/* exported
+    inventreeGet,
+    inventreeDelete,
+    inventreeFormDataUpload,
+    showApiError,
+*/
+
+$.urlParam = function(name) {
+    // eslint-disable-next-line no-useless-escape
     var results = new RegExp('[\?&]' + name + '=([^&#]*)').exec(window.location.href);
-    if (results==null) {
-       return null;
+    
+    if (results == null) {
+        return null;
     }
+    
     return decodeURI(results[1]) || 0;
-}
+};
+
 
 // using jQuery
 function getCookie(name) {
@@ -31,11 +43,10 @@ function getCookie(name) {
 function inventreeGet(url, filters={}, options={}) {
 
     // Middleware token required for data update
-    //var csrftoken = jQuery("[name=csrfmiddlewaretoken]").val();
     var csrftoken = getCookie('csrftoken');
 
     return $.ajax({
-        beforeSend: function(xhr, settings) {
+        beforeSend: function(xhr) {
             xhr.setRequestHeader('X-CSRFToken', csrftoken);
         },
         url: url,
@@ -43,6 +54,7 @@ function inventreeGet(url, filters={}, options={}) {
         data: filters,
         dataType: 'json',
         contentType: 'application/json',
+        async: (options.async == false) ? false : true,
         success: function(response) {
             if (options.success) {
                 options.success(response);
@@ -50,11 +62,17 @@ function inventreeGet(url, filters={}, options={}) {
         },
         error: function(xhr, ajaxOptions, thrownError) {
             console.error('Error on GET at ' + url);
-            console.error(thrownError);
+
+            if (thrownError) {
+                console.error('Error: ' + thrownError);
+            }
+
             if (options.error) {
                 options.error({
                     error: thrownError
                 });
+            } else {
+                showApiError(xhr, url);
             }
         }
     });
@@ -73,7 +91,7 @@ function inventreeFormDataUpload(url, data, options={}) {
     var csrftoken = getCookie('csrftoken');
 
     return $.ajax({
-        beforeSend: function(xhr, settings) {
+        beforeSend: function(xhr) {
             xhr.setRequestHeader('X-CSRFToken', csrftoken);
         },
         url: url,
@@ -91,6 +109,8 @@ function inventreeFormDataUpload(url, data, options={}) {
 
             if (options.error) {
                 options.error(xhr, status, error);
+            } else {
+                showApiError(xhr, url);
             }
         }
     });
@@ -101,11 +121,10 @@ function inventreePut(url, data={}, options={}) {
     var method = options.method || 'PUT';
 
     // Middleware token required for data update
-    //var csrftoken = jQuery("[name=csrfmiddlewaretoken]").val();
     var csrftoken = getCookie('csrftoken');
 
     return $.ajax({
-        beforeSend: function(xhr, settings) {
+        beforeSend: function(xhr) {
             xhr.setRequestHeader('X-CSRFToken', csrftoken);
         },
         url: url,
@@ -127,6 +146,8 @@ function inventreePut(url, data={}, options={}) {
             } else {
                 console.error(`Error on ${method} to '${url}' - STATUS ${xhr.status}`);
                 console.error(thrownError);
+
+                showApiError(xhr, url);
             }
         },
         complete: function(xhr, status) {
@@ -150,36 +171,49 @@ function inventreeDelete(url, options={}) {
     return inventreePut(url, {}, options);
 }
 
-
-function showApiError(xhr) {
+/*
+ * Display a notification with error information
+ */
+function showApiError(xhr, url) {
 
     var title = null;
     var message = null;
 
-    switch (xhr.status) {
-    case 0:     // No response
+    switch (xhr.status || 0) {
+    // No response
+    case 0:
         title = '{% trans "No Response" %}';
         message = '{% trans "No response from the InvenTree server" %}';
         break;
-    case 400:   // Bad request
+    // Bad request
+    case 400:
         // Note: Normally error code 400 is handled separately,
         //       and should now be shown here!
         title = '{% trans "Error 400: Bad request" %}';
         message = '{% trans "API request returned error code 400" %}';
         break;
-    case 401:   // Not authenticated
+    // Not authenticated
+    case 401:
         title = '{% trans "Error 401: Not Authenticated" %}';
         message = '{% trans "Authentication credentials not supplied" %}';
         break;
-    case 403:   // Permission denied
+    // Permission denied
+    case 403:
         title = '{% trans "Error 403: Permission Denied" %}';
         message = '{% trans "You do not have the required permissions to access this function" %}';
         break;
-    case 404:   // Resource not found
+    // Resource not found
+    case 404:
         title = '{% trans "Error 404: Resource Not Found" %}';
         message = '{% trans "The requested resource could not be located on the server" %}';
         break;
-    case 408:   // Timeout
+    // Method not allowed
+    case 405:
+        title = '{% trans "Error 405: Method Not Allowed" %}';
+        message = '{% trans "HTTP method not allowed at URL" %}';
+        break;
+    // Timeout
+    case 408:
         title = '{% trans "Error 408: Timeout" %}';
         message = '{% trans "Connection timeout while requesting data from server" %}';
         break;
@@ -189,8 +223,14 @@ function showApiError(xhr) {
         break;
     }
 
-    message += "<hr>";
-    message += renderErrorMessage(xhr);
+    if (url) {
+        message += '<hr>';
+        message += `URL: ${url}`;
+    }
 
-    showAlertDialog(title, message);
+    showMessage(title, {
+        style: 'danger',
+        icon: 'fas fa-server icon-red',
+        details: message,
+    });
 }

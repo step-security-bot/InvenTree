@@ -1,5 +1,16 @@
 {% load i18n %}
 
+/* globals
+    getAvailableTableFilters,
+    inventreeLoad,
+    inventreeSave,
+    reloadTableFilters,
+*/
+   
+/* exported
+   setupFilterList,
+*/
+
 /**
  * Code for managing query filters / table options.
  * 
@@ -16,12 +27,12 @@
 
 function defaultFilters() {
     return {
-        stock: "cascade=1&in_stock=1",
-        build: "",
-        parts: "cascade=1",
-        company: "",
-        salesorder: "",
-        purchaseorder: "",
+        stock: 'cascade=1&in_stock=1',
+        build: '',
+        parts: 'cascade=1',
+        company: '',
+        salesorder: '',
+        purchaseorder: '',
     };
 }
 
@@ -34,7 +45,7 @@ function defaultFilters() {
  */
 function loadTableFilters(tableKey) {
 
-    var lookup = "table-filters-" + tableKey.toLowerCase();
+    var lookup = 'table-filters-' + tableKey.toLowerCase();
 
     var defaults = defaultFilters()[tableKey] || '';
 
@@ -42,7 +53,7 @@ function loadTableFilters(tableKey) {
 
     var filters = {};
 
-    filterstring.split("&").forEach(function(item, index) {
+    filterstring.split('&').forEach(function(item) {
         item = item.trim();
 
         if (item.length > 0) {
@@ -67,7 +78,7 @@ function loadTableFilters(tableKey) {
  * @param {*} filters - object of string:string pairs
  */
 function saveTableFilters(tableKey, filters) {
-    var lookup = "table-filters-" + tableKey.toLowerCase();
+    var lookup = 'table-filters-' + tableKey.toLowerCase();
 
     var strings = [];
 
@@ -190,7 +201,7 @@ function generateAvailableFilterList(tableKey) {
 
     var html = `<select class='form-control filter-input' id='${id}' name='tag'>`;
 
-    html += "<option value=''>{% trans 'Select filter' %}</option>";
+    html += `<option value=''>{% trans 'Select filter' %}</option>`;
 
     for (var opt in remaining) {
         var title = getFilterTitle(tableKey, opt);
@@ -227,7 +238,7 @@ function generateFilterInput(tableKey, filterKey) {
         html = `<select class='form-control filter-input' id='${id}' name='value'>`;
 
         for (var key in options) {
-            option = options[key];
+            var option = options[key];
             html += `<option value='${key}'>${option.value}</option>`;
         }
 
@@ -245,7 +256,7 @@ function generateFilterInput(tableKey, filterKey) {
  * @param {*} table - bootstrapTable element to update
  * @param {*} target - name of target element on page
  */
-function setupFilterList(tableKey, table, target) {
+function setupFilterList(tableKey, table, target, options={}) {
 
     var addClicked = false;
 
@@ -262,29 +273,66 @@ function setupFilterList(tableKey, table, target) {
 
     var element = $(target);
 
+    if (!element || !element.exists()) {
+        console.log(`WARNING: setupFilterList could not find target '${target}'`);
+        return;
+    }
+
     // One blank slate, please
     element.empty();
 
-    element.append(`<button id='reload-${tableKey}' title='{% trans "Reload data" %}' class='btn btn-default filter-tag'><span class='fas fa-redo-alt'></span></button>`);
+    var buttons = '';
 
-    element.append(`<button id='${add}' title='{% trans "Add new filter" %}' class='btn btn-default filter-tag'><span class='fas fa-filter'></span></button>`);
-
-    if (Object.keys(filters).length > 0) {
-        element.append(`<button id='${clear}' title='{% trans "Clear all filters" %}' class='btn btn-default filter-tag'><span class='fas fa-trash-alt'></span></button>`);
+    // Add download button
+    if (options.download) {
+        buttons += `<button id='download-${tableKey}' title='{% trans "Download data" %}' class='btn btn-outline-secondary filter-button'><span class='fas fa-download'></span></button>`;
     }
+
+    buttons += `<button id='reload-${tableKey}' title='{% trans "Reload data" %}' class='btn btn-outline-secondary filter-button'><span class='fas fa-redo-alt'></span></button>`;
+
+    // If there are filters defined for this table, add more buttons
+    if (!jQuery.isEmptyObject(getAvailableTableFilters(tableKey))) {
+        buttons += `<button id='${add}' title='{% trans "Add new filter" %}' class='btn btn-outline-secondary filter-button'><span class='fas fa-filter'></span></button>`;
+
+        if (Object.keys(filters).length > 0) {
+            buttons += `<button id='${clear}' title='{% trans "Clear all filters" %}' class='btn btn-outline-secondary filter-button'><span class='fas fa-backspace icon-red'></span></button>`;
+        }
+    }
+
+    element.html(`
+    <div class='btn-group filter-group' role='group'>
+        ${buttons}
+    </div>
+    `);
 
     for (var key in filters) {
         var value = getFilterOptionValue(tableKey, key, filters[key]);
         var title = getFilterTitle(tableKey, key);
         var description = getFilterDescription(tableKey, key);
 
-        element.append(`<div title='${description}' class='filter-tag'>${title} = ${value}<span ${tag}='${key}' class='close'>x</span></div>`);
+        var filter_tag = `
+        <div title='${description}' class='filter-tag'>
+            ${title} = ${value}
+            <span ${tag}='${key}' class='close' style='color: #F55;'>
+                <span aria-hidden='true'><strong>&times;</strong></span>
+            </span>
+        </div>
+        `;
+
+        element.append(filter_tag);
     }
 
     // Callback for reloading the table
     element.find(`#reload-${tableKey}`).click(function() {
         $(table).bootstrapTable('refresh');
     });
+
+    // Add a callback for downloading table data
+    if (options.download) {
+        element.find(`#download-${tableKey}`).click(function() {
+            downloadTableData($(table));
+        });
+    }
 
     // Add a callback for adding a new filter
     element.find(`#${add}`).click(function clicked() {
@@ -295,14 +343,12 @@ function setupFilterList(tableKey, table, target) {
 
             var html = '';
 
-            //`<div class='filter-input'>`;
-
+            html += `<div class='input-group'>`;
             html += generateAvailableFilterList(tableKey);
             html += generateFilterInput(tableKey);
 
-            html += `<button title='{% trans "Create filter" %}' class='btn btn-default filter-tag' id='${make}'><span class='fas fa-plus'></span></button>`;
-
-            //html += '</div>';
+            html += `<button title='{% trans "Create filter" %}' class='btn btn-outline-secondary filter-button' id='${make}'><span class='fas fa-plus'></span></button>`;
+            html += `</div>`;
 
             element.append(html);
 
@@ -324,14 +370,14 @@ function setupFilterList(tableKey, table, target) {
                     reloadTableFilters(table, filters);
 
                     // Run this function again
-                    setupFilterList(tableKey, table, target);
+                    setupFilterList(tableKey, table, target, options);
                 }
 
             });
         } else {
             addClicked = false;
 
-            setupFilterList(tableKey, table, target);
+            setupFilterList(tableKey, table, target, options);
         }
 
     });
@@ -342,11 +388,11 @@ function setupFilterList(tableKey, table, target) {
 
         reloadTableFilters(table, filters);
 
-        setupFilterList(tableKey, table, target);
+        setupFilterList(tableKey, table, target, options);
     });
 
     // Add callback for deleting each filter
-    element.find(".close").click(function(event) {
+    element.find('.close').click(function() {
         var me = $(this);
 
         var filter = me.attr(`filter-tag-${tableKey}`);
@@ -356,7 +402,7 @@ function setupFilterList(tableKey, table, target) {
         reloadTableFilters(table, filters);
 
         // Run this function again!
-        setupFilterList(tableKey, table, target);
+        setupFilterList(tableKey, table, target, options);
     });
 }
 
@@ -371,15 +417,6 @@ function getFilterTitle(tableKey, filterKey) {
     return settings.title || filterKey;
 }
 
-
-/**
- * Return the pretty description for the given table and filter selection
- */
-function getFilterDescription(tableKey, filterKey) {
-    var settings = getFilterSettings(tableKey, filterKey);
-
-    return settings.title;
-}
 
 /*
  * Return a description for the given table and filter selection.

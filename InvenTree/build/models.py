@@ -4,19 +4,21 @@ Build database model definitions
 
 # -*- coding: utf-8 -*-
 from __future__ import unicode_literals
+import decimal
 
 import os
 from datetime import datetime
 
 from django.contrib.auth.models import User
-from django.utils.translation import ugettext_lazy as _
 from django.core.exceptions import ValidationError
-
-from django.urls import reverse
+from django.core.validators import MinValueValidator
 from django.db import models, transaction
 from django.db.models import Sum, Q
 from django.db.models.functions import Coalesce
-from django.core.validators import MinValueValidator
+from django.db.models.signals import post_save
+from django.dispatch.dispatcher import receiver
+from django.urls import reverse
+from django.utils.translation import ugettext_lazy as _
 
 from markdownx.models import MarkdownxField
 
@@ -25,16 +27,17 @@ from mptt.exceptions import InvalidMove
 
 from InvenTree.status_codes import BuildStatus, StockStatus, StockHistoryCode
 from InvenTree.helpers import increment, getSetting, normalize, MakeBarcode
+from InvenTree.models import InvenTreeAttachment, ReferenceIndexingMixin
 from InvenTree.validators import validate_build_order_reference
-from InvenTree.models import InvenTreeAttachment
-
-import common.models
 
 import InvenTree.fields
 import InvenTree.helpers
+import InvenTree.tasks
 
-from stock import models as StockModels
+from plugin.events import trigger_event
+
 from part import models as PartModels
+from stock import models as StockModels
 from users import models as UserModels
 
 
@@ -44,7 +47,7 @@ def get_next_build_number():
     """
 
     if Build.objects.count() == 0:
-        return
+        return '0001'
 
     build = Build.objects.exclude(reference=None).last()
 
@@ -63,11 +66,11 @@ def get_next_build_number():
             attempts.add(reference)
         else:
             break
-    
+
     return reference
 
 
-class Build(MPTTModel):
+class Build(MPTTModel, ReferenceIndexingMixin):
     """ A Build object organises the creation of new StockItem objects from other existing StockItem objects.
 
     Attributes:
@@ -91,7 +94,7 @@ class Build(MPTTModel):
     """
 
     OVERDUE_FILTER = Q(status__in=BuildStatus.ACTIVE_CODES) & ~Q(target_date=None) & Q(target_date__lte=datetime.now().date())
-    
+
     @staticmethod
     def get_api_url():
         return reverse('api-build-list')
@@ -104,7 +107,24 @@ class Build(MPTTModel):
             }
         }
 
+    @classmethod
+    def api_defaults(cls, request):
+        """
+        Return default values for this model when issuing an API OPTIONS request
+        """
+
+        defaults = {
+            'reference': get_next_build_number(),
+        }
+
+        if request and request.user:
+            defaults['issued_by'] = request.user.pk
+
+        return defaults
+
     def save(self, *args, **kwargs):
+
+        self.rebuild_reference_field()
 
         try:
             super().save(*args, **kwargs)
@@ -363,9 +383,7 @@ class Build(MPTTModel):
         Returns the BOM items for the part referenced by this BuildOrder
         """
 
-        return self.part.bom_items.all().prefetch_related(
-            'sub_part'
-        )
+        return self.part.get_bom_items()
 
     @property
     def tracked_bom_items(self):
@@ -415,6 +433,9 @@ class Build(MPTTModel):
     def output_count(self):
         return self.build_outputs.count()
 
+    def has_build_outputs(self):
+        return self.output_count > 0
+
     def get_build_outputs(self, **kwargs):
         """
         Return a list of build outputs.
@@ -454,8 +475,6 @@ class Build(MPTTModel):
 
         outputs = self.get_build_outputs(complete=True)
 
-        # TODO - Ordering?
-
         return outputs
 
     @property
@@ -465,8 +484,6 @@ class Build(MPTTModel):
         """
 
         outputs = self.get_build_outputs(complete=False)
-
-        # TODO - Order by how "complete" they are?
 
         return outputs
 
@@ -535,10 +552,10 @@ class Build(MPTTModel):
         if self.incomplete_count > 0:
             return False
 
-        if self.completed < self.quantity:
+        if self.remaining > 0:
             return False
 
-        if not self.areUntrackedPartsFullyAllocated():
+        if not self.are_untracked_parts_allocated():
             return False
 
         # No issues!
@@ -559,11 +576,14 @@ class Build(MPTTModel):
         self.save()
 
         # Remove untracked allocated stock
-        self.subtractUntrackedStock(user)
+        self.subtract_allocated_stock(user)
 
         # Ensure that there are no longer any BuildItem objects
-        # which point to thie Build Order
+        # which point to thisFcan Build Order
         self.allocated_stock.all().delete()
+
+        # Register an event
+        trigger_event('build.completed', id=self.pk)
 
     @transaction.atomic
     def cancelBuild(self, user):
@@ -584,90 +604,16 @@ class Build(MPTTModel):
         self.status = BuildStatus.CANCELLED
         self.save()
 
-    def getAutoAllocations(self):
-        """
-        Return a list of StockItem objects which will be allocated
-        using the 'AutoAllocate' function.
-
-        For each item in the BOM for the attached Part,
-        the following tests must *all* evaluate to True,
-        for the part to be auto-allocated:
-
-        - The sub_item in the BOM line must *not* be trackable
-        - There is only a single stock item available (which has not already been allocated to this build)
-        - The stock item has an availability greater than zero
-
-        Returns:
-            A list object containing the StockItem objects to be allocated (and the quantities).
-            Each item in the list is a dict as follows:
-            {
-                'stock_item': stock_item,
-                'quantity': stock_quantity,
-            }
-        """
-
-        allocations = []
-
-        """
-        Iterate through each item in the BOM
-        """
-
-        for bom_item in self.bom_items:
-
-            part = bom_item.sub_part
-
-            # If the part is "trackable" it cannot be auto-allocated
-            if part.trackable:
-                continue
-
-            # Skip any parts which are already fully allocated
-            if self.isPartFullyAllocated(part, None):
-                continue
-
-            # How many parts are required to complete the output?
-            required = self.unallocatedQuantity(part, None)
-
-            # Grab a list of stock items which are available
-            stock_items = self.availableStockItems(part, None)
-
-            # Ensure that the available stock items are in the correct location
-            if self.take_from is not None:
-                # Filter for stock that is located downstream of the designated location
-                stock_items = stock_items.filter(location__in=[loc for loc in self.take_from.getUniqueChildren()])
-
-            # Only one StockItem to choose from? Default to that one!
-            if stock_items.count() == 1:
-                stock_item = stock_items[0]
-
-                # Double check that we have not already allocated this stock-item against this build
-                build_items = BuildItem.objects.filter(
-                    build=self,
-                    stock_item=stock_item,
-                )
-
-                if len(build_items) > 0:
-                    continue
-
-                # How many items are actually available?
-                if stock_item.quantity > 0:
-
-                    # Only take as many as are available
-                    if stock_item.quantity < required:
-                        required = stock_item.quantity
-
-                    allocation = {
-                        'stock_item': stock_item,
-                        'quantity': required,
-                    }
-
-                    allocations.append(allocation)
-
-        return allocations
+        trigger_event('build.cancelled', id=self.pk)
 
     @transaction.atomic
-    def unallocateOutput(self, output, part=None):
+    def unallocateStock(self, bom_item=None, output=None):
         """
-        Unallocate all stock which are allocated against the provided "output" (StockItem)
+        Unallocate stock from this Build
+
+        arguments:
+            - bom_item: Specify a particular BomItem to unallocate stock against
+            - output: Specify a particular StockItem (output) to unallocate stock against
         """
 
         allocations = BuildItem.objects.filter(
@@ -675,34 +621,8 @@ class Build(MPTTModel):
             install_into=output
         )
 
-        if part:
-            allocations = allocations.filter(stock_item__part=part)
-
-        allocations.delete()
-
-    @transaction.atomic
-    def unallocateUntracked(self, part=None):
-        """
-        Unallocate all "untracked" stock
-        """
-
-        allocations = BuildItem.objects.filter(
-            build=self,
-            install_into=None
-        )
-
-        if part:
-            allocations = allocations.filter(stock_item__part=part)
-
-        allocations.delete()
-
-    @transaction.atomic
-    def unallocateAll(self):
-        """
-        Deletes all stock allocations for this build.
-        """
-
-        allocations = BuildItem.objects.filter(build=self)
+        if bom_item:
+            allocations = allocations.filter(bom_item=bom_item)
 
         allocations.delete()
 
@@ -718,11 +638,13 @@ class Build(MPTTModel):
             batch: Override batch code
             serials: Serial numbers
             location: Override location
+            auto_allocate: Automatically allocate stock with matching serial numbers
         """
 
         batch = kwargs.get('batch', self.batch)
         location = kwargs.get('location', self.destination)
         serials = kwargs.get('serials', None)
+        auto_allocate = kwargs.get('auto_allocate', False)
 
         """
         Determine if we can create a single output (with quantity > 0),
@@ -744,6 +666,9 @@ class Build(MPTTModel):
             Create multiple build outputs with a single quantity of 1
             """
 
+            # Quantity *must* be an integer at this point!
+            quantity = int(quantity)
+
             for ii in range(quantity):
 
                 if serials:
@@ -751,7 +676,7 @@ class Build(MPTTModel):
                 else:
                     serial = None
 
-                StockModels.StockItem.objects.create(
+                output = StockModels.StockItem.objects.create(
                     quantity=1,
                     location=location,
                     part=self.part,
@@ -760,6 +685,37 @@ class Build(MPTTModel):
                     serial=serial,
                     is_building=True,
                 )
+
+                if auto_allocate and serial is not None:
+
+                    # Get a list of BomItem objects which point to "trackable" parts
+
+                    for bom_item in self.part.get_trackable_parts():
+
+                        parts = bom_item.get_valid_parts_for_allocation()
+
+                        for part in parts:
+
+                            items = StockModels.StockItem.objects.filter(
+                                part=part,
+                                serial=str(serial),
+                                quantity=1,
+                            ).filter(StockModels.StockItem.IN_STOCK_FILTER)
+
+                            """
+                            Test if there is a matching serial number!
+                            """
+                            if items.exists() and items.count() == 1:
+                                stock_item = items[0]
+
+                                # Allocate the stock item
+                                BuildItem.objects.create(
+                                    build=self,
+                                    bom_item=bom_item,
+                                    stock_item=stock_item,
+                                    quantity=quantity,
+                                    install_into=output,
+                                )
 
         else:
             """
@@ -780,7 +736,7 @@ class Build(MPTTModel):
             self.save()
 
     @transaction.atomic
-    def deleteBuildOutput(self, output):
+    def delete_output(self, output):
         """
         Remove a build output from the database:
 
@@ -798,44 +754,13 @@ class Build(MPTTModel):
             raise ValidationError(_("Build output does not match Build Order"))
 
         # Unallocate all build items against the output
-        self.unallocateOutput(output)
+        self.unallocateStock(output=output)
 
         # Remove the build output from the database
         output.delete()
 
     @transaction.atomic
-    def autoAllocate(self):
-        """
-        Run auto-allocation routine to allocate StockItems to this Build.
-
-        Args:
-            output: If specified, only auto-allocate against the given built output
-
-        Returns a list of dict objects with keys like:
-
-            {
-                'stock_item': item,
-                'quantity': quantity,
-            }
-
-        See: getAutoAllocations()
-        """
-
-        allocations = self.getAutoAllocations()
-
-        for item in allocations:
-            # Create a new allocation
-            build_item = BuildItem(
-                build=self,
-                stock_item=item['stock_item'],
-                quantity=item['quantity'],
-                install_into=None
-            )
-
-            build_item.save()
-
-    @transaction.atomic
-    def subtractUntrackedStock(self, user):
+    def subtract_allocated_stock(self, user):
         """
         Called when the Build is marked as "complete",
         this function removes the allocated untracked items from stock.
@@ -853,7 +778,7 @@ class Build(MPTTModel):
         items.all().delete()
 
     @transaction.atomic
-    def completeBuildOutput(self, output, user, **kwargs):
+    def complete_build_output(self, output, user, **kwargs):
         """
         Complete a particular build output
 
@@ -870,10 +795,6 @@ class Build(MPTTModel):
         allocated_items = output.items_to_install.all()
 
         for build_item in allocated_items:
-
-            # TODO: This is VERY SLOW as each deletion from the database takes ~1 second to complete
-            # TODO: Use the background worker process to handle this task!
-
             # Complete the allocation of stock for that item
             build_item.complete_allocation(user)
 
@@ -899,9 +820,10 @@ class Build(MPTTModel):
 
         # Increase the completed quantity for this build
         self.completed += output.quantity
+
         self.save()
 
-    def requiredQuantity(self, part, output):
+    def required_quantity(self, bom_item, output=None):
         """
         Get the quantity of a part required to complete the particular build output.
 
@@ -910,12 +832,7 @@ class Build(MPTTModel):
             output - The particular build output (StockItem)
         """
 
-        # Extract the BOM line item from the database
-        try:
-            bom_item = PartModels.BomItem.objects.get(part=self.part.pk, sub_part=part.pk)
-            quantity = bom_item.quantity
-        except (PartModels.BomItem.DoesNotExist):
-            quantity = 0
+        quantity = bom_item.quantity
 
         if output:
             quantity *= output.quantity
@@ -924,32 +841,32 @@ class Build(MPTTModel):
 
         return quantity
 
-    def allocatedItems(self, part, output):
+    def allocated_bom_items(self, bom_item, output=None):
         """
-        Return all BuildItem objects which allocate stock of <part> to <output>
+        Return all BuildItem objects which allocate stock of <bom_item> to <output>
+
+        Note that the bom_item may allow variants, or direct substitutes,
+        making things difficult.
 
         Args:
-            part - The part object
+            bom_item - The BomItem object
             output - Build output (StockItem).
         """
 
-        # Remember, if 'variant' stock is allowed to be allocated, it becomes more complicated!
-        variants = part.get_descendants(include_self=True)
-
         allocations = BuildItem.objects.filter(
             build=self,
-            stock_item__part__pk__in=[p.pk for p in variants],
+            bom_item=bom_item,
             install_into=output,
         )
 
         return allocations
 
-    def allocatedQuantity(self, part, output):
+    def allocated_quantity(self, bom_item, output=None):
         """
         Return the total quantity of given part allocated to a given build output.
         """
 
-        allocations = self.allocatedItems(part, output)
+        allocations = self.allocated_bom_items(bom_item, output)
 
         allocated = allocations.aggregate(
             q=Coalesce(
@@ -961,24 +878,24 @@ class Build(MPTTModel):
 
         return allocated['q']
 
-    def unallocatedQuantity(self, part, output):
+    def unallocated_quantity(self, bom_item, output=None):
         """
         Return the total unallocated (remaining) quantity of a part against a particular output.
         """
 
-        required = self.requiredQuantity(part, output)
-        allocated = self.allocatedQuantity(part, output)
+        required = self.required_quantity(bom_item, output)
+        allocated = self.allocated_quantity(bom_item, output)
 
         return max(required - allocated, 0)
 
-    def isPartFullyAllocated(self, part, output):
+    def is_bom_item_allocated(self, bom_item, output=None):
         """
-        Returns True if the part has been fully allocated to the particular build output
+        Test if the supplied BomItem has been fully allocated!
         """
 
-        return self.unallocatedQuantity(part, output) == 0
+        return self.unallocated_quantity(bom_item, output) == 0
 
-    def isFullyAllocated(self, output, verbose=False):
+    def is_fully_allocated(self, output):
         """
         Returns True if the particular build output is fully allocated.
         """
@@ -989,53 +906,24 @@ class Build(MPTTModel):
         else:
             bom_items = self.tracked_bom_items
 
-        fully_allocated = True
-
         for bom_item in bom_items:
-            part = bom_item.sub_part
 
-            if not self.isPartFullyAllocated(part, output):
-                fully_allocated = False
-
-                if verbose:
-                    print(f"Part {part} is not fully allocated for output {output}")
-                else:
-                    break
+            if not self.is_bom_item_allocated(bom_item, output):
+                return False
 
         # All parts must be fully allocated!
-        return fully_allocated
+        return True
 
-    def areUntrackedPartsFullyAllocated(self):
+    def are_untracked_parts_allocated(self):
         """
         Returns True if the un-tracked parts are fully allocated for this BuildOrder
         """
 
-        return self.isFullyAllocated(None)
+        return self.is_fully_allocated(None)
 
-    def allocatedParts(self, output):
+    def unallocated_bom_items(self, output):
         """
-        Return a list of parts which have been fully allocated against a particular output
-        """
-
-        allocated = []
-
-        # If output is not specified, we are talking about "untracked" items
-        if output is None:
-            bom_items = self.untracked_bom_items
-        else:
-            bom_items = self.tracked_bom_items
-
-        for bom_item in bom_items:
-            part = bom_item.sub_part
-
-            if self.isPartFullyAllocated(part, output):
-                allocated.append(part)
-
-        return allocated
-
-    def unallocatedParts(self, output):
-        """
-        Return a list of parts which have *not* been fully allocated against a particular output
+        Return a list of bom items which have *not* been fully allocated against a particular output
         """
 
         unallocated = []
@@ -1047,10 +935,9 @@ class Build(MPTTModel):
             bom_items = self.tracked_bom_items
 
         for bom_item in bom_items:
-            part = bom_item.sub_part
 
-            if not self.isPartFullyAllocated(part, output):
-                unallocated.append(part)
+            if not self.is_bom_item_allocated(bom_item, output):
+                unallocated.append(bom_item)
 
         return unallocated
 
@@ -1078,57 +965,6 @@ class Build(MPTTModel):
 
         return parts
 
-    def availableStockItems(self, part, output):
-        """
-        Returns stock items which are available for allocation to this build.
-
-        Args:
-            part - Part object
-            output - The particular build output
-        """
-
-        # Grab initial query for items which are "in stock" and match the part
-        items = StockModels.StockItem.objects.filter(
-            StockModels.StockItem.IN_STOCK_FILTER
-        )
-
-        # Check if variants are allowed for this part
-        try:
-            bom_item = PartModels.BomItem.objects.get(part=self.part, sub_part=part)
-            allow_part_variants = bom_item.allow_variants
-        except PartModels.BomItem.DoesNotExist:
-            allow_part_variants = False
-
-        if allow_part_variants:
-            parts = part.get_descendants(include_self=True)
-            items = items.filter(part__pk__in=[p.pk for p in parts])
-
-        else:
-            items = items.filter(part=part)
-
-        # Exclude any items which have already been allocated
-        allocated = BuildItem.objects.filter(
-            build=self,
-            stock_item__part=part,
-            install_into=output,
-        )
-
-        items = items.exclude(
-            id__in=[item.stock_item.id for item in allocated.all()]
-        )
-
-        # Limit query to stock items which are "downstream" of the source location
-        if self.take_from is not None:
-            items = items.filter(
-                location__in=[loc for loc in self.take_from.getUniqueChildren()]
-            )
-
-        # Exclude expired stock items
-        if not common.models.InvenTreeSetting.get_setting('STOCK_ALLOW_EXPIRED_BUILD'):
-            items = items.exclude(StockModels.StockItem.EXPIRED_FILTER)
-
-        return items
-
     @property
     def is_active(self):
         """ Is this build active? An active build is either:
@@ -1144,6 +980,19 @@ class Build(MPTTModel):
         """ Returns True if the build status is COMPLETE """
 
         return self.status == BuildStatus.COMPLETE
+
+
+@receiver(post_save, sender=Build, dispatch_uid='build_post_save_log')
+def after_save_build(sender, instance: Build, created: bool, **kwargs):
+    """
+    Callback function to be executed after a Build instance is saved
+    """
+
+    if created:
+        # A new Build has just been created
+
+        # Run checks on required parts
+        InvenTree.tasks.offload_task('build.tasks.check_build_stock', instance)
 
 
 class BuildOrderAttachment(InvenTreeAttachment):
@@ -1165,8 +1014,10 @@ class BuildItem(models.Model):
 
     Attributes:
         build: Link to a Build object
+        bom_item: Link to a BomItem object (may or may not point to the same part as the build)
         stock_item: Link to a StockItem object
         quantity: Number of units allocated
+        install_into: Destination stock item (or None)
     """
 
     @staticmethod
@@ -1185,35 +1036,13 @@ class BuildItem(models.Model):
 
     def save(self, *args, **kwargs):
 
-        self.validate_unique()
         self.clean()
 
         super().save()
 
-    def validate_unique(self, exclude=None):
-        """
-        Test that this BuildItem object is "unique".
-        Essentially we do not want a stock_item being allocated to a Build multiple times.
-        """
-
-        super().validate_unique(exclude)
-
-        items = BuildItem.objects.exclude(id=self.id).filter(
-            build=self.build,
-            stock_item=self.stock_item,
-            install_into=self.install_into
-        )
-
-        if items.exists():
-            msg = _("BuildItem must be unique for build, stock_item and install_into")
-            raise ValidationError({
-                'build': msg,
-                'stock_item': msg,
-                'install_into': msg
-            })
-
     def clean(self):
-        """ Check validity of the BuildItem model.
+        """
+        Check validity of this BuildItem instance.
         The following checks are performed:
 
         - StockItem.part must be in the BOM of the Part object referenced by Build
@@ -1224,8 +1053,6 @@ class BuildItem(models.Model):
 
         super().clean()
 
-        errors = {}
-
         try:
 
             # If the 'part' is trackable, then the 'install_into' field must be set!
@@ -1234,28 +1061,38 @@ class BuildItem(models.Model):
 
             # Allocated quantity cannot exceed available stock quantity
             if self.quantity > self.stock_item.quantity:
-                errors['quantity'] = [_("Allocated quantity ({n}) must not exceed available quantity ({q})").format(
-                    n=normalize(self.quantity),
-                    q=normalize(self.stock_item.quantity)
-                )]
+
+                q = normalize(self.quantity)
+                a = normalize(self.stock_item.quantity)
+
+                raise ValidationError({
+                    'quantity': _(f'Allocated quantity ({q}) must not execed available stock quantity ({a})')
+                })
 
             # Allocated quantity cannot cause the stock item to be over-allocated
-            if self.stock_item.quantity - self.stock_item.allocation_count() + self.quantity < self.quantity:
-                errors['quantity'] = _('StockItem is over-allocated')
+            available = decimal.Decimal(self.stock_item.quantity)
+            allocated = decimal.Decimal(self.stock_item.allocation_count())
+            quantity = decimal.Decimal(self.quantity)
+
+            if available - allocated + quantity < quantity:
+                raise ValidationError({
+                    'quantity': _('Stock item is over-allocated')
+                })
 
             # Allocated quantity must be positive
             if self.quantity <= 0:
-                errors['quantity'] = _('Allocation quantity must be greater than zero')
+                raise ValidationError({
+                    'quantity': _('Allocation quantity must be greater than zero'),
+                })
 
             # Quantity must be 1 for serialized stock
             if self.stock_item.serialized and not self.quantity == 1:
-                errors['quantity'] = _('Quantity must be 1 for serialized stock')
+                raise ValidationError({
+                    'quantity': _('Quantity must be 1 for serialized stock')
+                })
 
         except (StockModels.StockItem.DoesNotExist, PartModels.Part.DoesNotExist):
             pass
-
-        if len(errors) > 0:
-            raise ValidationError(errors)
 
         """
         Attempt to find the "BomItem" which links this BuildItem to the build.
@@ -1265,25 +1102,24 @@ class BuildItem(models.Model):
 
         bom_item_valid = False
 
-        if self.bom_item:
+        if self.bom_item and self.build:
             """
             A BomItem object has already been assigned. This is valid if:
 
-            a) It points to the same "part" as the referened build
+            a) It points to the same "part" as the referenced build
             b) Either:
                 i) The sub_part points to the same part as the referenced StockItem
                 ii) The BomItem allows variants and the part referenced by the StockItem
                     is a variant of the sub_part referenced by the BomItem
+                iii) The Part referenced by the StockItem is a valid substitute for the BomItem
             """
 
-            if self.build and self.build.part == self.bom_item.part:
+            if self.build.part == self.bom_item.part:
+                bom_item_valid = self.bom_item.is_stock_item_valid(self.stock_item)
 
-                # Check that the sub_part points to the stock_item (either directly or via a variant)
-                if self.bom_item.sub_part == self.stock_item.part:
-                    bom_item_valid = True
-
-                elif self.bom_item.allow_variants and self.stock_item.part in self.bom_item.sub_part.get_descendants(include_self=False):
-                    bom_item_valid = True
+            elif self.bom_item.inherited:
+                if self.build.part in self.bom_item.part.get_descendants(include_self=False):
+                    bom_item_valid = self.bom_item.is_stock_item_valid(self.stock_item)
 
         # If the existing BomItem is *not* valid, try to find a match
         if not bom_item_valid:
@@ -1297,7 +1133,7 @@ class BuildItem(models.Model):
                         bom_item = PartModels.BomItem.objects.get(part=self.build.part, sub_part=ancestor)
                     except PartModels.BomItem.DoesNotExist:
                         continue
-                    
+
                     # A matching BOM item has been found!
                     if idx == 0 or bom_item.allow_variants:
                         bom_item_valid = True
@@ -1309,7 +1145,7 @@ class BuildItem(models.Model):
         if not bom_item_valid:
 
             raise ValidationError({
-                'stock_item': _("Selected stock item not found in BOM for part '{p}'").format(p=self.build.part.full_name)
+                'stock_item': _("Selected stock item not found in BOM")
             })
 
     @transaction.atomic
@@ -1327,7 +1163,12 @@ class BuildItem(models.Model):
         if item.part.trackable:
             # Split the allocated stock if there are more available than allocated
             if item.quantity > self.quantity:
-                item = item.splitStock(self.quantity, None, user)
+                item = item.splitStock(
+                    self.quantity,
+                    None,
+                    user,
+                    code=StockHistoryCode.BUILD_CONSUMED,
+                )
 
                 # Make sure we are pointing to the new item
                 self.stock_item = item
@@ -1338,7 +1179,11 @@ class BuildItem(models.Model):
             item.save()
         else:
             # Simply remove the items from stock
-            item.take_stock(self.quantity, user)
+            item.take_stock(
+                self.quantity,
+                user,
+                code=StockHistoryCode.BUILD_CONSUMED
+            )
 
     def getStockItemThumbnail(self):
         """
@@ -1353,7 +1198,7 @@ class BuildItem(models.Model):
                 thumb_url = self.stock_item.part.image.thumbnail.url
             except:
                 pass
-        
+
         if thumb_url is None and self.bom_item and self.bom_item.sub_part:
             try:
                 thumb_url = self.bom_item.sub_part.image.thumbnail.url

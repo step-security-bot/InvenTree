@@ -8,8 +8,10 @@ from rest_framework import serializers
 
 from sql_util.utils import SubqueryCount
 
-from InvenTree.serializers import InvenTreeModelSerializer
+from InvenTree.serializers import InvenTreeDecimalField
 from InvenTree.serializers import InvenTreeImageSerializerField
+from InvenTree.serializers import InvenTreeModelSerializer
+from InvenTree.serializers import InvenTreeMoneySerializer
 
 from part.serializers import PartBriefSerializer
 
@@ -185,7 +187,7 @@ class SupplierPartSerializer(InvenTreeModelSerializer):
         part_detail = kwargs.pop('part_detail', True)
         supplier_detail = kwargs.pop('supplier_detail', True)
         manufacturer_detail = kwargs.pop('manufacturer_detail', True)
-        
+
         prettify = kwargs.pop('pretty', False)
 
         super(SupplierPartSerializer, self).__init__(*args, **kwargs)
@@ -254,9 +256,13 @@ class SupplierPartSerializer(InvenTreeModelSerializer):
 class SupplierPriceBreakSerializer(InvenTreeModelSerializer):
     """ Serializer for SupplierPriceBreak object """
 
-    quantity = serializers.FloatField()
+    quantity = InvenTreeDecimalField()
 
-    price = serializers.CharField()
+    price = InvenTreeMoneySerializer(
+        allow_null=True,
+        required=True,
+        label=_('Price'),
+    )
 
     price_currency = serializers.ChoiceField(
         choices=currency_code_mappings(),

@@ -12,6 +12,7 @@ from decimal import Decimal
 from django.db import models, transaction
 from django.db.models import Q, F, Sum
 from django.db.models.functions import Coalesce
+
 from django.core.validators import MinValueValidator
 from django.core.exceptions import ValidationError
 from django.contrib.auth.models import User
@@ -29,11 +30,13 @@ from users import models as UserModels
 from part import models as PartModels
 from stock import models as stock_models
 from company.models import Company, SupplierPart
+from plugin.events import trigger_event
 
+import InvenTree.helpers
 from InvenTree.fields import InvenTreeModelMoneyField, RoundingDecimalField
 from InvenTree.helpers import decimal2string, increment, getSetting
 from InvenTree.status_codes import PurchaseOrderStatus, SalesOrderStatus, StockStatus, StockHistoryCode
-from InvenTree.models import InvenTreeAttachment
+from InvenTree.models import InvenTreeAttachment, ReferenceIndexingMixin
 
 
 def get_next_po_number():
@@ -42,7 +45,7 @@ def get_next_po_number():
     """
 
     if PurchaseOrder.objects.count() == 0:
-        return
+        return '0001'
 
     order = PurchaseOrder.objects.exclude(reference=None).last()
 
@@ -71,7 +74,7 @@ def get_next_so_number():
     """
 
     if SalesOrder.objects.count() == 0:
-        return
+        return '0001'
 
     order = SalesOrder.objects.exclude(reference=None).last()
 
@@ -94,7 +97,7 @@ def get_next_so_number():
     return reference
 
 
-class Order(models.Model):
+class Order(ReferenceIndexingMixin):
     """ Abstract model for an order.
 
     Instances of this class:
@@ -112,46 +115,10 @@ class Order(models.Model):
         responsible: User (or group) responsible for managing the order
     """
 
-    @classmethod
-    def getNextOrderNumber(cls):
-        """
-        Try to predict the next order-number
-        """
-
-        if cls.objects.count() == 0:
-            return None
-
-        # We will assume that the latest pk has the highest PO number
-        order = cls.objects.last()
-        ref = order.reference
-
-        if not ref:
-            return None
-
-        tries = set()
-
-        tries.add(ref)
-
-        while 1:
-            new_ref = increment(ref)
-
-            print("Reference:", new_ref)
-
-            if new_ref in tries:
-                # We are in a looping situation - simply return the original one
-                return ref
-
-            # Check that the new ref does not exist in the database
-            if cls.objects.filter(reference=new_ref).exists():
-                tries.add(new_ref)
-                new_ref = increment(new_ref)
-
-            else:
-                break
-
-        return new_ref
-
     def save(self, *args, **kwargs):
+
+        self.rebuild_reference_field()
+
         if not self.creation_date:
             self.creation_date = datetime.now().date()
 
@@ -358,6 +325,8 @@ class PurchaseOrder(Order):
             self.issue_date = datetime.now().date()
             self.save()
 
+            trigger_event('purchaseorder.placed', id=self.pk)
+
     @transaction.atomic
     def complete_order(self):
         """ Marks the PurchaseOrder as COMPLETE. Order must be currently PLACED. """
@@ -366,6 +335,8 @@ class PurchaseOrder(Order):
             self.status = PurchaseOrderStatus.COMPLETE
             self.complete_date = datetime.now().date()
             self.save()
+
+            trigger_event('purchaseorder.completed', id=self.pk)
 
     @property
     def is_overdue(self):
@@ -397,6 +368,8 @@ class PurchaseOrder(Order):
             self.status = PurchaseOrderStatus.CANCELLED
             self.save()
 
+            trigger_event('purchaseorder.cancelled', id=self.pk)
+
     def pending_line_items(self):
         """ Return a list of pending line items for this order.
         Any line item where 'received' < 'quantity' will be returned.
@@ -404,59 +377,110 @@ class PurchaseOrder(Order):
 
         return self.lines.filter(quantity__gt=F('received'))
 
+    def completed_line_items(self):
+        """
+        Return a list of completed line items against this order
+        """
+        return self.lines.filter(quantity__lte=F('received'))
+
+    @property
+    def line_count(self):
+        return self.lines.count()
+
+    @property
+    def completed_line_count(self):
+
+        return self.completed_line_items().count()
+
+    @property
+    def pending_line_count(self):
+        return self.pending_line_items().count()
+
     @property
     def is_complete(self):
         """ Return True if all line items have been received """
 
-        return self.pending_line_items().count() == 0
+        return self.lines.count() > 0 and self.pending_line_items().count() == 0
 
     @transaction.atomic
-    def receive_line_item(self, line, location, quantity, user, status=StockStatus.OK, purchase_price=None, **kwargs):
-        """ Receive a line item (or partial line item) against this PO
+    def receive_line_item(self, line, location, quantity, user, status=StockStatus.OK, **kwargs):
+        """
+        Receive a line item (or partial line item) against this PO
         """
 
+        # Extract optional batch code for the new stock item
+        batch_code = kwargs.get('batch_code', '')
+
+        # Extract optional list of serial numbers
+        serials = kwargs.get('serials', None)
+
+        # Extract optional notes field
         notes = kwargs.get('notes', '')
 
+        # Extract optional barcode field
+        barcode = kwargs.get('barcode', None)
+
+        # Prevent null values for barcode
+        if barcode is None:
+            barcode = ''
+
         if not self.status == PurchaseOrderStatus.PLACED:
-            raise ValidationError({"status": _("Lines can only be received against an order marked as 'Placed'")})
+            raise ValidationError(
+                "Lines can only be received against an order marked as 'PLACED'"
+            )
 
         try:
-            if not (quantity % 1 == 0):
-                raise ValidationError({"quantity": _("Quantity must be an integer")})
             if quantity < 0:
-                raise ValidationError({"quantity": _("Quantity must be a positive number")})
-            quantity = int(quantity)
-        except (ValueError, TypeError):
-            raise ValidationError({"quantity": _("Invalid quantity provided")})
+                raise ValidationError({
+                    "quantity": _("Quantity must be a positive number")
+                })
+            quantity = InvenTree.helpers.clean_decimal(quantity)
+        except TypeError:
+            raise ValidationError({
+                "quantity": _("Invalid quantity provided")
+            })
 
         # Create a new stock item
         if line.part and quantity > 0:
-            stock = stock_models.StockItem(
-                part=line.part.part,
-                supplier_part=line.part,
-                location=location,
-                quantity=quantity,
-                purchase_order=self,
-                status=status,
-                purchase_price=purchase_price,
-            )
 
-            stock.save(add_note=False)
+            # Determine if we should individually serialize the items, or not
+            if type(serials) is list and len(serials) > 0:
+                serialize = True
+            else:
+                serialize = False
+                serials = [None]
 
-            tracking_info = {
-                'status': status,
-                'purchaseorder': self.pk,
-            }
+            for sn in serials:
 
-            stock.add_tracking_entry(
-                StockHistoryCode.RECEIVED_AGAINST_PURCHASE_ORDER,
-                user,
-                notes=notes,
-                deltas=tracking_info,
-                location=location,
-                purchaseorder=self,
-                quantity=quantity
-            )
+                stock = stock_models.StockItem(
+                    part=line.part.part,
+                    supplier_part=line.part,
+                    location=location,
+                    quantity=1 if serialize else quantity,
+                    purchase_order=self,
+                    status=status,
+                    batch=batch_code,
+                    serial=sn,
+                    purchase_price=line.purchase_price,
+                    uid=barcode
+                )
+
+                stock.save(add_note=False)
+
+                tracking_info = {
+                    'status': status,
+                    'purchaseorder': self.pk,
+                }
+
+                stock.add_tracking_entry(
+                    StockHistoryCode.RECEIVED_AGAINST_PURCHASE_ORDER,
+                    user,
+                    notes=notes,
+                    deltas=tracking_info,
+                    location=location,
+                    purchaseorder=self,
+                    quantity=quantity
+                )
 
         # Update the number of parts received against the particular line item
         line.received += quantity
@@ -521,6 +545,12 @@ class SalesOrder(Order):
         queryset = queryset.filter(completed | pending)
 
         return queryset
+
+    def save(self, *args, **kwargs):
+
+        self.rebuild_reference_field()
+
+        super().save(*args, **kwargs)
 
     def __str__(self):
 
@@ -658,6 +688,16 @@ class SalesOrder(Order):
     def is_pending(self):
         return self.status == SalesOrderStatus.PENDING
 
+    @property
+    def stock_allocations(self):
+        """
+        Return a queryset containing all allocations for this order
+        """
+
+        return SalesOrderAllocation.objects.filter(
+            line__in=[line.pk for line in self.lines.all()]
+        )
+
     def is_fully_allocated(self):
         """ Return True if all line items are fully allocated """
 
@@ -676,30 +716,60 @@ class SalesOrder(Order):
 
         return False
 
-    @transaction.atomic
-    def ship_order(self, user):
-        """ Mark this order as 'shipped' """
+    def is_completed(self):
+        """
+        Check if this order is "shipped" (all line items delivered),
+        """
 
-        # The order can only be 'shipped' if the current status is PENDING
-        if not self.status == SalesOrderStatus.PENDING:
-            raise ValidationError({'status': _("SalesOrder cannot be shipped as it is not currently pending")})
+        return self.lines.count() > 0 and all([line.is_completed() for line in self.lines.all()])
 
-        # Complete the allocation for each allocated StockItem
-        for line in self.lines.all():
-            for allocation in line.allocations.all():
-                allocation.complete_allocation(user)
+    def can_complete(self, raise_error=False):
+        """
+        Test if this SalesOrder can be completed.
 
-                # Remove the allocation from the database once it has been 'fulfilled'
-                if allocation.item.sales_order == self:
-                    allocation.delete()
-                else:
-                    raise ValidationError("Could not complete order - allocation item not fulfilled")
+        Throws a ValidationError if cannot be completed.
+        """
 
-        # Ensure the order status is marked as "Shipped"
+        try:
+
+            # Order without line items cannot be completed
+            if self.lines.count() == 0:
+                raise ValidationError(_('Order cannot be completed as no parts have been assigned'))
+
+            # Only a PENDING order can be marked as SHIPPED
+            elif self.status != SalesOrderStatus.PENDING:
+                raise ValidationError(_('Only a pending order can be marked as complete'))
+
+            elif self.pending_shipment_count > 0:
+                raise ValidationError(_("Order cannot be completed as there are incomplete shipments"))
+
+            elif self.pending_line_count > 0:
+                raise ValidationError(_("Order cannot be completed as there are incomplete line items"))
+
+        except ValidationError as e:
+
+            if raise_error:
+                raise e
+            else:
+                return False
+
+        return True
+
+    def complete_order(self, user):
+        """
+        Mark this order as "complete"
+        """
+
+        if not self.can_complete():
+            return False
+
         self.status = SalesOrderStatus.SHIPPED
-        self.shipment_date = datetime.now().date()
         self.shipped_by = user
+        self.shipment_date = datetime.now()
+
         self.save()
+
+        trigger_event('salesorder.completed', id=self.pk)
 
         return True
 
@@ -732,7 +802,58 @@ class SalesOrder(Order):
             for allocation in line.allocations.all():
                 allocation.delete()
 
+        trigger_event('salesorder.cancelled', id=self.pk)
+
         return True
+
+    @property
+    def line_count(self):
+        return self.lines.count()
+
+    def completed_line_items(self):
+        """
+        Return a queryset of the completed line items for this order
+        """
+        return self.lines.filter(shipped__gte=F('quantity'))
+
+    def pending_line_items(self):
+        """
+        Return a queryset of the pending line items for this order
+        """
+        return self.lines.filter(shipped__lt=F('quantity'))
+
+    @property
+    def completed_line_count(self):
+        return self.completed_line_items().count()
+
+    @property
+    def pending_line_count(self):
+        return self.pending_line_items().count()
+
+    def completed_shipments(self):
+        """
+        Return a queryset of the completed shipments for this order
+        """
+        return self.shipments.exclude(shipment_date=None)
+
+    def pending_shipments(self):
+        """
+        Return a queryset of the pending shipments for this order
+        """
+
+        return self.shipments.filter(shipment_date=None)
+
+    @property
+    def shipment_count(self):
+        return self.shipments.count()
+
+    @property
+    def completed_shipment_count(self):
+        return self.completed_shipments().count()
+
+    @property
+    def pending_shipment_count(self):
+        return self.pending_shipments().count()
 
 
 class PurchaseOrderAttachment(InvenTreeAttachment):
@@ -770,9 +891,18 @@ class OrderLineItem(models.Model):
 
     Attributes:
         quantity: Number of items
+        reference: Reference text (e.g. customer reference) for this line item
         note: Annotation for the item
+        target_date: An (optional) date for expected shipment of this line item.
+    """
 
     """
+    Query filter for determining if an individual line item is "overdue":
+    - Amount received is less than the required quantity
+    - Target date is not None
+    - Target date is in the past
+    """
+    OVERDUE_FILTER = Q(received__lt=F('quantity')) & ~Q(target_date=None) & Q(target_date__lt=datetime.now().date())
 
     class Meta:
         abstract = True
@@ -789,19 +919,11 @@ class OrderLineItem(models.Model):
 
     notes = models.CharField(max_length=500, blank=True, verbose_name=_('Notes'), help_text=_('Line item notes'))
 
-    def get_item_hash(self):
-        """ Calculate the checksum hash of this order line item """
-
-        # Seed the hash with the ID of this order item
-        hash = hashlib.md5(str(self.id).encode())
-
-        # Update the hash based on line information
-        hash.update(str(self.quantity).encode())
-        hash.update(str(self.part.id).encode())
-        hash.update(str(self.sale_price_currency).encode())
-        hash.update(str(self.sale_price).encode())
-
-        return str(hash.digest())
+    target_date = models.DateField(
+        blank=True, null=True,
+        verbose_name=_('Target Date'),
+        help_text=_('Target shipping date for this line item'),
+    )
 
 
 class PurchaseOrderLineItem(OrderLineItem):
@@ -812,14 +934,24 @@ class PurchaseOrderLineItem(OrderLineItem):
 
     """
 
+    class Meta:
+        unique_together = (
+        )
+
     @staticmethod
     def get_api_url():
         return reverse('api-po-line-list')
 
-    class Meta:
-        unique_together = (
-            ('order', 'part', 'quantity', 'purchase_price')
-        )
+    def clean(self):
+
+        super().clean()
+
+        if self.order.supplier and self.part:
+            # Supplier part *must* point to the same supplier!
+            if self.part.supplier != self.order.supplier:
+                raise ValidationError({
+                    'part': _('Supplier part must match supplier')
+                })
 
     def __str__(self):
         return "{n} x {part} from {supplier} (for {po})".format(
@@ -838,7 +970,7 @@ class PurchaseOrderLineItem(OrderLineItem):
     def get_base_part(self):
         """
         Return the base part.Part object for the line item
-        
+
         Note: Returns None if the SupplierPart is not set!
         """
         if self.part is None:
@@ -856,7 +988,13 @@ class PurchaseOrderLineItem(OrderLineItem):
         help_text=_("Supplier part"),
     )
 
-    received = models.DecimalField(decimal_places=5, max_digits=15, default=0, verbose_name=_('Received'), help_text=_('Number of items received'))
+    received = models.DecimalField(
+        decimal_places=5,
+        max_digits=15,
+        default=0,
+        verbose_name=_('Received'),
+        help_text=_('Number of items received')
+    )
 
     purchase_price = InvenTreeModelMoneyField(
         max_digits=19,
@@ -867,7 +1005,7 @@ class PurchaseOrderLineItem(OrderLineItem):
     )
 
     destination = TreeForeignKey(
-        'stock.StockLocation', on_delete=models.DO_NOTHING,
+        'stock.StockLocation', on_delete=models.SET_NULL,
         verbose_name=_('Destination'),
         related_name='po_lines',
         blank=True, null=True,
@@ -875,13 +1013,15 @@ class PurchaseOrderLineItem(OrderLineItem):
     )
 
     def get_destination(self):
-        """Show where the line item is or should be placed"""
-        # NOTE: If a line item gets split when recieved, only an arbitrary
-        # stock items location will be reported as the location for the
-        # entire line.
-        for stock in stock_models.StockItem.objects.filter(
-            supplier_part=self.part, purchase_order=self.order
-        ):
+        """
+        Show where the line item is or should be placed
+
+        NOTE: If a line item gets split when recieved, only an arbitrary
+              stock items location will be reported as the location for the
+              entire line.
+        """
+
+        for stock in stock_models.StockItem.objects.filter(supplier_part=self.part, purchase_order=self.order):
             if stock.location:
                 return stock.location
         if self.destination:
@@ -903,13 +1043,20 @@ class SalesOrderLineItem(OrderLineItem):
         order: Link to the SalesOrder that this line item belongs to
         part: Link to a Part object (may be null)
         sale_price: The unit sale price for this OrderLineItem
+        shipped: The number of items which have actually shipped against this line item
     """
 
     @staticmethod
     def get_api_url():
         return reverse('api-so-line-list')
 
-    order = models.ForeignKey(SalesOrder, on_delete=models.CASCADE, related_name='lines', verbose_name=_('Order'), help_text=_('Sales Order'))
+    order = models.ForeignKey(
+        SalesOrder,
+        on_delete=models.CASCADE,
+        related_name='lines',
+        verbose_name=_('Order'),
+        help_text=_('Sales Order')
+    )
 
     part = models.ForeignKey('part.Part', on_delete=models.SET_NULL, related_name='sales_order_line_items', null=True, verbose_name=_('Part'), help_text=_('Part'), limit_choices_to={'salable': True})
 
@@ -919,6 +1066,14 @@ class SalesOrderLineItem(OrderLineItem):
         null=True, blank=True,
         verbose_name=_('Sale Price'),
         help_text=_('Unit sale price'),
+    )
+
+    shipped = RoundingDecimalField(
+        verbose_name=_('Shipped'),
+        help_text=_('Shipped quantity'),
+        default=0,
+        max_digits=15, decimal_places=5,
+        validators=[MinValueValidator(0)]
     )
 
     class Meta:
@@ -956,44 +1111,131 @@ class SalesOrderLineItem(OrderLineItem):
         """ Return True if this line item is over allocated """
         return self.allocated_quantity() > self.quantity
 
-    def sale_price_converted(self):
-        return convert_money(self.sale_price, currency_code_default())
+    def is_completed(self):
+        """
+        Return True if this line item is completed (has been fully shipped)
+        """
 
-    def sale_price_converted_currency(self):
-        return currency_code_default()
+        return self.shipped >= self.quantity
 
 
-class SalesOrderAdditionalLineItem(OrderLineItem):
+class SalesOrderShipment(models.Model):
     """
-    Model for a single AdditionalLineItem in a SalesOrder
+    The SalesOrderShipment model represents a physical shipment made against a SalesOrder.
+
+    - Points to a single SalesOrder object
+    - Multiple SalesOrderAllocation objects point to a particular SalesOrderShipment
+    - When a given SalesOrderShipment is "shipped", stock items are removed from stock
 
     Attributes:
-        order: Link to the SalesOrder that this line item belongs to
-        title: titile of line item
-        sale_price: The unit sale price for this OrderLineItem
+        order: SalesOrder reference
+        shipment_date: Date this shipment was "shipped" (or null)
+        checked_by: User reference field indicating who checked this order
+        reference: Custom reference text for this shipment (e.g. consignment number?)
+        notes: Custom notes field for this shipment
     """
 
-    order = models.ForeignKey(SalesOrder, on_delete=models.CASCADE, related_name='additional_lines', verbose_name=_('Order'), help_text=_('Sales Order'))
+    class Meta:
+        # Shipment reference must be unique for a given sales order
+        unique_together = [
+            'order', 'reference',
+        ]
 
-    title = models.CharField(verbose_name=_('title'), help_text=_('titel of the additional line'), max_length=250)
+    @staticmethod
+    def get_api_url():
+        return reverse('api-so-shipment-list')
 
-    sale_price = InvenTreeModelMoneyField(
-        max_digits=19,
-        decimal_places=4,
-        null=True, blank=True,
-        verbose_name=_('Sale Price'),
-        help_text=_('Unit sale price'),
+    order = models.ForeignKey(
+        SalesOrder,
+        on_delete=models.CASCADE,
+        blank=False, null=False,
+        related_name='shipments',
+        verbose_name=_('Order'),
+        help_text=_('Sales Order'),
     )
 
-    def sale_price_converted(self):
-        return convert_money(self.sale_price, currency_code_default())
+    shipment_date = models.DateField(
+        null=True, blank=True,
+        verbose_name=_('Shipment Date'),
+        help_text=_('Date of shipment'),
+    )
 
-    def sale_price_converted_currency(self):
-        return currency_code_default()
+    checked_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        blank=True, null=True,
+        verbose_name=_('Checked By'),
+        help_text=_('User who checked this shipment'),
+        related_name='+',
+    )
 
-    class Meta:
-        unique_together = [
-        ]
+    reference = models.CharField(
+        max_length=100,
+        blank=False,
+        verbose_name=('Shipment'),
+        help_text=_('Shipment number'),
+        default='1',
+    )
+
+    notes = MarkdownxField(
+        blank=True,
+        verbose_name=_('Notes'),
+        help_text=_('Shipment notes'),
+    )
+
+    tracking_number = models.CharField(
+        max_length=100,
+        blank=True,
+        unique=False,
+        verbose_name=_('Tracking Number'),
+        help_text=_('Shipment tracking information'),
+    )
+
+    def is_complete(self):
+        return self.shipment_date is not None
+
+    def check_can_complete(self):
+
+        if self.shipment_date:
+            # Shipment has already been sent!
+            raise ValidationError(_("Shipment has already been sent"))
+
+        if self.allocations.count() == 0:
+            raise ValidationError(_("Shipment has no allocated stock items"))
+
+    @transaction.atomic
+    def complete_shipment(self, user, **kwargs):
+        """
+        Complete this particular shipment:
+
+        1. Update any stock items associated with this shipment
+        2. Update the "shipped" quantity of all associated line items
+        3. Set the "shipment_date" to now
+        """
+
+        # Check if the shipment can be completed (throw error if not)
+        self.check_can_complete()
+
+        allocations = self.allocations.all()
+
+        # Iterate through each stock item assigned to this shipment
+        for allocation in allocations:
+            # Mark the allocation as "complete"
+            allocation.complete_allocation(user)
+
+        # Update the "shipment" date
+        self.shipment_date = datetime.now()
+        self.shipped_by = user
+
+        # Was a tracking number provided?
+        tracking_number = kwargs.get('tracking_number', None)
+
+        if tracking_number is not None:
+            self.tracking_number = tracking_number
+
+        self.save()
+
+        trigger_event('salesordershipment.completed', id=self.pk)
 
 
 class SalesOrderAllocation(models.Model):
@@ -1004,6 +1246,7 @@ class SalesOrderAllocation(models.Model):
 
     Attributes:
         line: SalesOrderLineItem reference
+        shipment: SalesOrderShipment reference
         item: StockItem reference
         quantity: Quantity to take from the StockItem
 
@@ -1059,10 +1302,27 @@ class SalesOrderAllocation(models.Model):
         if self.item.serial and not self.quantity == 1:
             errors['quantity'] = _('Quantity must be 1 for serialized stock item')
 
+        if self.line.order != self.shipment.order:
+            errors['line'] = _('Sales order does not match shipment')
+            errors['shipment'] = _('Shipment does not match sales order')
+
         if len(errors) > 0:
             raise ValidationError(errors)
 
-    line = models.ForeignKey(SalesOrderLineItem, on_delete=models.CASCADE, verbose_name=_('Line'), related_name='allocations')
+    line = models.ForeignKey(
+        SalesOrderLineItem,
+        on_delete=models.CASCADE,
+        verbose_name=_('Line'),
+        related_name='allocations'
+    )
+
+    shipment = models.ForeignKey(
+        SalesOrderShipment,
+        on_delete=models.CASCADE,
+        related_name='allocations',
+        verbose_name=_('Shipment'),
+        help_text=_('Sales order shipment reference'),
+    )
 
     item = models.ForeignKey(
         'stock.StockItem',
@@ -1110,6 +1370,10 @@ class SalesOrderAllocation(models.Model):
             order=order,
             user=user
         )
+
+        # Update the 'shipped' quantity
+        self.line.shipped += self.quantity
+        self.line.save()
 
         # Update our own reference to the StockItem
         # (It may have changed if the stock was split)
