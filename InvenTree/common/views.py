@@ -68,6 +68,13 @@ class MultiStepFormView(SessionWizardView):
         return context
 
 
+class MultiStepFormView(InvenTreeMultiStepMixin, SessionWizardView):
+    """ Setup basic methods of multi-step form
+
+        form_list: list of forms
+        form_steps_description: description for each form
+    """
+    pass
 class FileManagementFormView(MultiStepFormView):
     """File management form wizard.
 
