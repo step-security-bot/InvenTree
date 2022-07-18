@@ -539,7 +539,8 @@ class SupplierPart(models.Model):
     # lead_time = models.DurationField(blank=True, null=True)
 
     updated = models.DateTimeField(
-        auto_now=True, verbose_name=_("last updated")
+        auto_now=True, verbose_name=_("last updated"),
+        null=True, blank=True,
     )
 
     available = models.DecimalField(

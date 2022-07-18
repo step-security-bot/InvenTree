@@ -314,10 +314,10 @@ class SupplierPartList(ListCreateDestroyAPIView):
             queryset = queryset.filter(part__active=active)
 
         # Order by last_updated?
-        order_by = params.get('ordering', None)
+        # order_by = params.get('ordering', None)
 
-        if 'last_updated' in order_by:
-            queryset = queryset.order_by(order_by)
+        # if 'last_updated' in order_by:
+        #     queryset = queryset.order_by(order_by)
 
         return queryset
 
@@ -347,6 +347,10 @@ class SupplierPartList(ListCreateDestroyAPIView):
     ]
 
     filterset_fields = [
+    ]
+
+    ordering_fields = [
+        'last_updated',
     ]
 
     search_fields = [

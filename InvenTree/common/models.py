@@ -1665,7 +1665,8 @@ class PriceBreak(models.Model):
     )
 
     updated = models.DateTimeField(
-        auto_now=True, verbose_name=_("last updated")
+        auto_now=True, verbose_name=_("last updated"),
+        null=True, blank=True,
     )
 
     def convert_to(self, currency_code):
