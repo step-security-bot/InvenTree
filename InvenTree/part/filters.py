@@ -20,7 +20,7 @@ from decimal import Decimal
 
 from django.db import models
 from django.db.models import F, FloatField, Func, OuterRef, Q, Subquery
-from django.db.models.functions import Coalesce
+from django.db.models.functions import Coalesce, Greatest
 
 from sql_util.utils import SubquerySum
 
@@ -79,10 +79,10 @@ def annotate_last_updated(reference: str = ''):
     - Include supplier part's price breaks
     """
 
-    return models.Max(
-        F('updated'),
-        F('availability_updated'),
-        # TODO Add price breaks
+    return Greatest(
+        Coalesce('availability_updated', 'updated',),
+        Coalesce(models.Max('pricebreaks__updated'), 'updated',),
+        'updated',
         output_field=models.DateTimeField()
     )
 

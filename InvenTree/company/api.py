@@ -313,12 +313,6 @@ class SupplierPartList(ListCreateDestroyAPIView):
             active = str2bool(active)
             queryset = queryset.filter(part__active=active)
 
-        # Order by last_updated?
-        # order_by = params.get('ordering', None)
-
-        # if 'last_updated' in order_by:
-        #     queryset = queryset.order_by(order_by)
-
         return queryset
 
     def get_serializer(self, *args, **kwargs):
@@ -350,7 +344,7 @@ class SupplierPartList(ListCreateDestroyAPIView):
     ]
 
     ordering_fields = [
-        'last_updated',
+        'updated',
     ]
 
     search_fields = [

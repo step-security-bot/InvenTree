@@ -159,8 +159,6 @@ class SupplierPriceBreakResource(InvenTreeResource):
 
     MPN = Field(attribute='part__MPN', readonly=True)
 
-    last_updated = Field(readonly=True)
-
     class Meta:
         """Metaclass defines extra admin options"""
         model = SupplierPriceBreak
