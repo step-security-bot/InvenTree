@@ -92,7 +92,7 @@ def manage(c, cmd, pty: bool = False):
 @task
 def plugins(c):
     """Installs all plugins as specified in 'plugins.txt'."""
-    from InvenTree.InvenTree.config import get_plugin_file
+    from accu.accu.core.config import get_plugin_file
 
     plugin_file = get_plugin_file()
 
@@ -527,7 +527,7 @@ def test(c, database=None):
 def setup_test(c, ignore_update=False, dev=False, path="inventree-demo-dataset"):
     """Setup a testing enviroment."""
 
-    from InvenTree.InvenTree.config import get_media_dir
+    from accu.accu.core.config import get_settings_dir
 
     if not ignore_update:
         update(c)
@@ -553,7 +553,7 @@ def setup_test(c, ignore_update=False, dev=False, path="inventree-demo-dataset")
     # Copy media files
     print("Copying media files ...")
     src = Path(path).joinpath('media').resolve()
-    dst = get_media_dir()
+    dst = get_settings_dir('media', create=True)
 
     shutil.copytree(src, dst, dirs_exist_ok=True)
 

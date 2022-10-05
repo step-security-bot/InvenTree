@@ -21,10 +21,14 @@ from django.utils.translation import gettext_lazy as _
 
 import moneyed
 import sentry_sdk
+from accu.accu.core.config import (get_custom_file, get_plugin_file,
+                                   get_secret_key, get_setting,
+                                   load_config_data)
+from accu.accu.core.utils import is_true
 from sentry_sdk.integrations.django import DjangoIntegration
 
-from . import config
-from .config import get_boolean_setting, get_custom_file, get_setting
+from .config import (get_base_dir, get_boolean_setting, get_media_dir,
+                     get_static_dir)
 
 # Determine if we are running in "test" mode e.g. "manage.py test"
 TESTING = 'test' in sys.argv
@@ -36,10 +40,10 @@ TESTING_ENV = False
 DEFAULT_AUTO_FIELD = 'django.db.models.AutoField'
 
 # Build paths inside the project like this: BASE_DIR.joinpath(...)
-BASE_DIR = config.get_base_dir()
+BASE_DIR = get_base_dir()
 
 # Load configuration data
-CONFIG = config.load_config_data()
+CONFIG = load_config_data()
 
 # Default action is to run the system in Debug mode
 # SECURITY WARNING: don't run with debug turned on in production!
@@ -79,13 +83,13 @@ LOGGING = {
 logger = logging.getLogger("inventree")
 
 # Load SECRET_KEY
-SECRET_KEY = config.get_secret_key()
+SECRET_KEY = get_secret_key()
 
 # The filesystem location for served static files
-STATIC_ROOT = config.get_static_dir()
+STATIC_ROOT = get_static_dir()
 
 # The filesystem location for uploaded meadia files
-MEDIA_ROOT = config.get_media_dir()
+MEDIA_ROOT = get_media_dir()
 
 # List of allowed hosts (default = allow all)
 ALLOWED_HOSTS = get_setting(
@@ -520,7 +524,7 @@ if cache_host:  # pragma: no cover
         "SOCKET_CONNECT_TIMEOUT": int(os.getenv("CACHE_CONNECT_TIMEOUT", "2")),
         "SOCKET_TIMEOUT": int(os.getenv("CACHE_SOCKET_TIMEOUT", "2")),
         "CONNECTION_POOL_KWARGS": {
-            "socket_keepalive": config.is_true(
+            "socket_keepalive": is_true(
                 os.getenv("CACHE_TCP_KEEPALIVE", "1")
             ),
             "socket_keepalive_options": {
@@ -813,7 +817,7 @@ MAINTENANCE_MODE_STATE_BACKEND = 'maintenance_mode.backends.DefaultStorageBacken
 # Are plugins enabled?
 PLUGINS_ENABLED = get_boolean_setting('INVENTREE_PLUGINS_ENABLED', 'plugins_enabled', False)
 
-PLUGIN_FILE = config.get_plugin_file()
+PLUGIN_FILE = get_plugin_file()
 
 # Plugin test settings
 PLUGIN_TESTING = CONFIG.get('PLUGIN_TESTING', TESTING)  # are plugins beeing tested?

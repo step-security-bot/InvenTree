@@ -14,6 +14,7 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings
 
 import requests
+from accu.accu.core.config import get_config_file, get_plugin_file, get_setting
 from djmoney.contrib.exchange.exceptions import MissingRate
 from djmoney.contrib.exchange.models import Rate, convert_money
 from djmoney.money import Money
@@ -27,7 +28,7 @@ from InvenTree.sanitizer import sanitize_svg
 from part.models import Part, PartCategory
 from stock.models import StockItem, StockLocation
 
-from . import config, helpers, ready, status, version
+from . import helpers, ready, status, version
 from .tasks import offload_task
 from .validators import validate_overage, validate_part_name
 
@@ -747,11 +748,11 @@ class TestSettings(helpers.InvenTreeTestCase):
             'inventree/data/config.yaml',
         ]
 
-        self.assertTrue(any([opt in str(config.get_config_file()).lower() for opt in valid]))
+        self.assertTrue(any([opt in str(get_config_file()).lower() for opt in valid]))
 
         # with env set
         with self.in_env_context({'INVENTREE_CONFIG_FILE': 'my_special_conf.yaml'}):
-            self.assertIn('inventree/my_special_conf.yaml', str(config.get_config_file()).lower())
+            self.assertIn('inventree/my_special_conf.yaml', str(get_config_file()).lower())
 
     def test_helpers_plugin_file(self):
         """Test get_plugin_file."""
@@ -762,21 +763,21 @@ class TestSettings(helpers.InvenTreeTestCase):
             'inventree/data/plugins.txt',
         ]
 
-        self.assertTrue(any([opt in str(config.get_plugin_file()).lower() for opt in valid]))
+        self.assertTrue(any([opt in str(get_plugin_file()).lower() for opt in valid]))
 
         # with env set
         with self.in_env_context({'INVENTREE_PLUGIN_FILE': 'my_special_plugins.txt'}):
-            self.assertIn('my_special_plugins.txt', str(config.get_plugin_file()))
+            self.assertIn('my_special_plugins.txt', str(get_plugin_file()))
 
     def test_helpers_setting(self):
         """Test get_setting."""
         TEST_ENV_NAME = '123TEST'
         # check that default gets returned if not present
-        self.assertEqual(config.get_setting(TEST_ENV_NAME, None, '123!'), '123!')
+        self.assertEqual(get_setting(TEST_ENV_NAME, None, '123!'), '123!')
 
         # with env set
         with self.in_env_context({TEST_ENV_NAME: '321'}):
-            self.assertEqual(config.get_setting(TEST_ENV_NAME, None), '321')
+            self.assertEqual(get_setting(TEST_ENV_NAME, None), '321')
 
 
 class TestInstanceName(helpers.InvenTreeTestCase):
