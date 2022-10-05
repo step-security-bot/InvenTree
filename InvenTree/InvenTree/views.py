@@ -22,6 +22,8 @@ from django.views.generic import (CreateView, DeleteView, DetailView, ListView,
                                   UpdateView)
 from django.views.generic.base import RedirectView, TemplateView
 
+from accu.accu.core.helpers.clean import (remove_non_printable_characters,
+                                          strip_html_tags)
 from allauth.account.forms import AddEmailForm
 from allauth.account.models import EmailAddress
 from allauth.account.views import (EmailView, LoginView,
@@ -38,7 +40,6 @@ from part.models import PartCategory
 from users.models import RuleSet, check_user_role
 
 from .forms import EditUserForm, SetPasswordForm
-from .helpers import remove_non_printable_characters, strip_html_tags
 
 
 def auth_request(request):
