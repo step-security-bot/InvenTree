@@ -168,10 +168,11 @@ class ParameterTests(TestCase):
             param = PartParameter(part=prt, template=template, data=value)
             param.full_clean()
 
-        # Invalid units also pass, but will be converted to the template units
+        # Test that invalid parameters fail
         for value in ['3 Amps', '-3 zogs', '3.14F']:
             param = PartParameter(part=prt, template=template, data=value)
-            param.full_clean()
+            with self.assertRaises(django_exceptions.ValidationError):
+                param.full_clean()
 
     def test_param_unit_conversion(self):
         """Test that parameters are correctly converted to template units"""
