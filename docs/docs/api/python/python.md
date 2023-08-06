@@ -78,7 +78,7 @@ If the primary-key of an object is already known, retrieving it from the databas
 ```python
 from inventree.part import PartCategory
 
-category = PartCatgory(api, 10)
+category = PartCategory(api, 10)
 ```
 
 #### Multiple Items
@@ -115,7 +115,7 @@ parent_categories = PartCategory.list(api, parent='')
 
 ### Item Attributes
 
-The available model attributes are determined by introspecting [API metadata](../metadata.md). To view the fields (attributes) availabel for a given database model type within the python interface, use the `fieldNames` and `fieldInfo` methods, as below:
+The available model attributes are determined by introspecting [API metadata](../metadata.md). To view the fields (attributes) available for a given database model type within the python interface, use the `fieldNames` and `fieldInfo` methods, as below:
 
 ```python
 from inventree.api import InvenTreeAPI

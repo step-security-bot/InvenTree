@@ -2,6 +2,7 @@
 
 import logging
 
+from django.core.exceptions import FieldError
 from django.db import migrations
 
 logger = logging.getLogger('inventree')
@@ -38,9 +39,12 @@ def fix_purchase_price(apps, schema_editor):
         supplier_part=None
     ).exclude(
         purchase_price=None
-    ).exclude(
-        supplier_part__pack_size=1
     )
+
+    try:
+        items = items.exclude(supplier_part__pack_size=1)
+    except FieldError:
+        pass
 
     n_updated = 0
 
@@ -62,18 +66,16 @@ def fix_purchase_price(apps, schema_editor):
         logger.info(f"Corrected purchase_price field for {n_updated} stock items.")
 
 
-def reverse(apps, schema_editor):  # pragmae: no cover
-    pass
-
 class Migration(migrations.Migration):
 
     dependencies = [
+        ('company', '0047_supplierpart_pack_size'),
         ('stock', '0093_auto_20230217_2140'),
     ]
 
     operations = [
         migrations.RunPython(
             fix_purchase_price,
-            reverse_code=reverse,
+            reverse_code=migrations.RunPython.noop,
         )
     ]

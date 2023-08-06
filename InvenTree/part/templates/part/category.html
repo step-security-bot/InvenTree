@@ -5,7 +5,7 @@
 
 {% block sidebar %}
 {% include 'part/category_sidebar.html' %}
-{% endblock %}
+{% endblock sidebar %}
 
 {% block breadcrumb_tree %}
 <div id="breadcrumb-tree"></div>
@@ -22,7 +22,7 @@
 {% else %}
 {% trans "Parts" %}
 {% endif %}
-{% endblock %}
+{% endblock heading %}
 
 {% block actions %}
 {% if category and user.is_staff and roles.part_category.change %}
@@ -69,7 +69,7 @@
 </div>
 {% endif %}
 {% endif %}
-{% endblock %}
+{% endblock actions %}
 
 {% block details_left %}
 <table class='table table-striped table-condensed'>
@@ -169,24 +169,7 @@
         </div>
     </div>
     <div id='part-button-toolbar'>
-        <div class='btn-group' role='group'>
-            <div class='btn-group' role='group'>
-                <button id='part-options' class='btn btn-primary dropdown-toggle' type='button' data-bs-toggle="dropdown">
-                    <span class='fas fa-tools' title='{% trans "Options" %}'></span>
-                </button>
-                <ul class='dropdown-menu'>
-                    {% if roles.part.change %}
-                    <li><a class='dropdown-item' href='#' id='multi-part-category' title='{% trans "Set category" %}'>
-                        <span class='fas fa-sitemap'></span> {% trans "Set Category" %}
-                    </a></li>
-                    {% endif %}
-                    <li><a class='dropdown-item' href='#' id='multi-part-order' title='{% trans "Order parts" %}'>
-                        <span class='fas fa-shopping-cart'></span> {% trans "Order Parts" %}
-                    </a></li>
-                </ul>
-            </div>
-            {% include "filter_list.html" with id="parts" %}
-        </div>
+        {% include "filter_list.html" with id="parts" %}
     </div>
     <div class='panel-content'>
         <table class='table table-striped table-condensed' data-toolbar='#part-button-toolbar' id='part-table'>
@@ -209,9 +192,7 @@
     </div>
     <div class='panel-content'>
         <div id='param-button-toolbar'>
-            <div class='btn-group' role='group'>
-                {% include "filter_list.html" with id="parameters" %}
-            </div>
+            {% include "filter_list.html" with id="parameters" %}
         </div>
 
         <table class='table table-striped table-condensed' data-toolbar='#param-button-toolbar' id='parametric-part-table'>
@@ -235,9 +216,7 @@
     </div>
     <div class='panel-content'>
         <div id='subcategory-button-toolbar'>
-            <div class='btn-group' role='group'>
-                {% include "filter_list.html" with id="category" %}
-            </div>
+            {% include "filter_list.html" with id="category" %}
         </div>
 
         <table class='table table-striped table-condensed' id='subcategory-table' data-toolbar='#subcategory-button-toolbar'></table>
@@ -245,11 +224,11 @@
     </div>
 </div>
 
-{% endblock %}
+{% endblock page_content %}
 
 {% block js_load %}
 {{ block.super }}
-{% endblock %}
+{% endblock js_load %}
 
 {% block js_ready %}
 {{ block.super }}
@@ -284,15 +263,6 @@
         );
     });
 
-    onPanelLoad('parameters', function() {
-        loadParametricPartTable(
-            "#parametric-part-table",
-            {
-                category: {{ category.pk }},
-            }
-        );
-    });
-
     $("#toggle-starred").click(function() {
         toggleStar({
             url: '{% url "api-part-category-detail" category.pk %}',
@@ -301,6 +271,19 @@
     });
 
     {% endif %}
+
+    onPanelLoad('parameters', function() {
+        loadParametricPartTable(
+            "#parametric-part-table",
+            {
+                params: {
+                    {% if category %}
+                    category: {{ category.pk }},
+                    {% endif %}
+                },
+            }
+        );
+    });
 
     // Enable breadcrumb tree view
     enableBreadcrumbTree({
@@ -352,7 +335,6 @@
         editCategory({{ category.pk }});
     });
 
-
     $('#cat-delete').click(function() {
         deletePartCategory({{ category.pk }}, {
             {% if category.parent %}
@@ -384,4 +366,4 @@
     // Enable left-hand navigation sidebar
     enableSidebar('category');
 
-{% endblock %}
+{% endblock js_ready %}

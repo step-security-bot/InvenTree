@@ -1,5 +1,6 @@
 {% load i18n %}
-
+{% load static %}
+{% load inventree_extras %}
 /* globals
     attachSelect,
     closeModal,
@@ -8,10 +9,12 @@
     modalEnable,
     modalSetContent,
     modalSetTitle,
+    modalShowSubmitButton,
     modalSubmit,
     openModal,
-    plugins_enabled,
     showAlertDialog,
+    showMessage,
+    user_settings,
 */
 
 /* exported
@@ -26,29 +29,26 @@
  * (via AJAX) from the server.
  */
 function selectLabel(labels, items, options={}) {
-
     // Array of available plugins for label printing
     var plugins = [];
 
     // Request a list of available label printing plugins from the server
-    if (plugins_enabled) {
-        inventreeGet(
-            `/api/plugins/`,
-            {
-                mixin: 'labels',
-            },
-            {
-                async: false,
-                success: function(response) {
-                    plugins = response;
-                }
+    inventreeGet(
+        `/api/plugins/`,
+        {
+            mixin: 'labels',
+        },
+        {
+            async: false,
+            success: function(response) {
+                plugins = response;
             }
-        );
-    }
+        }
+    );
 
     var plugin_selection = '';
 
-    if (plugins_enabled && plugins.length > 0) {
+    if (plugins.length > 0) {
         plugin_selection =`
         <div class='form-group'>
             <label class='control-label requiredField' for='id_plugin'>
@@ -56,7 +56,6 @@ function selectLabel(labels, items, options={}) {
             </label>
             <div class='controls'>
                 <select id='id_plugin' class='select form-control' name='plugin'>
-                    <option value='' title='{% trans "Export to PDF" %}'>{% trans "Export to PDF" %}</option>
         `;
 
         plugins.forEach(function(plugin) {
@@ -75,7 +74,6 @@ function selectLabel(labels, items, options={}) {
     }
 
     var modal = options.modal || '#modal-form';
-
     var label_list = makeOptionsList(
         labels,
         function(item) {
@@ -89,6 +87,16 @@ function selectLabel(labels, items, options={}) {
         },
         function(item) {
             return item.pk;
+        },
+        null,
+        function(item) {
+            if (options.key == 'part')
+                return item.pk == user_settings.DEFAULT_PART_LABEL_TEMPLATE;
+            else if (options.key == 'location')
+                return item.pk == user_settings.DEFAULT_LOCATION_LABEL_TEMPLATE;
+            else if (options.key == 'item')
+                return item.pk == user_settings.DEFAULT_ITEM_LABEL_TEMPLATE;
+            return '';
         }
     );
 
@@ -96,10 +104,10 @@ function selectLabel(labels, items, options={}) {
     var html = '';
 
     if (items.length > 0) {
-
+        let item_name = items.length == 1 ? options.singular_name : options.plural_name;
         html += `
         <div class='alert alert-block alert-info'>
-        ${items.length} {% trans "stock items selected" %}
+        ${items.length} ${item_name} {% trans "selected" %}
         </div>`;
     }
 
@@ -195,20 +203,24 @@ function printLabels(options) {
                         href += `${options.key}=${item}&`;
                     });
 
-                    if (data.plugin) {
-                        href += `plugin=${data.plugin}`;
+                    href += `plugin=${data.plugin}`;
 
-                        inventreeGet(href, {}, {
-                            success: function(response) {
+                    inventreeGet(href, {}, {
+                        success: function(response) {
+                            if (response.file) {
+                                // Download the generated file
+                                window.open(response.file);
+                            } else {
                                 showMessage('{% trans "Labels sent to printer" %}', {
                                     style: 'success',
                                 });
                             }
-                        });
-                    } else {
-                        window.open(href);
-                    }
-                }
+                        }
+                    });
+                },
+                plural_name: options.plural_name,
+                singular_name: options.singular_name,
+                key: options.key,
             });
         }
     });

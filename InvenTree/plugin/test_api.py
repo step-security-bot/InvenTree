@@ -4,13 +4,13 @@ from django.urls import reverse
 
 from rest_framework.exceptions import NotFound
 
-from InvenTree.api_tester import InvenTreeAPITestCase, PluginMixin
+from InvenTree.unit_test import InvenTreeAPITestCase, PluginMixin
 from plugin.api import check_plugin
 from plugin.models import PluginConfig
 
 
 class PluginDetailAPITest(PluginMixin, InvenTreeAPITestCase):
-    """Tests the plugin API endpoints."""
+    """Tests the plugin API endpoints"""
 
     roles = [
         'admin.add',
@@ -54,7 +54,7 @@ class PluginDetailAPITest(PluginMixin, InvenTreeAPITestCase):
         ).data
         self.assertEqual(data['success'], True)
 
-        # valid - github url and packagename
+        # valid - github url and package name
         data = self.post(
             url,
             {
@@ -139,7 +139,7 @@ class PluginDetailAPITest(PluginMixin, InvenTreeAPITestCase):
         }, follow=True)
         self.assertEqual(response.status_code, 200)
 
-        # deactivate plugin - deactivate again -> nothing will hapen but the nothing 'changed' function is triggered
+        # deactivate plugin - deactivate again -> nothing will happen but the nothing 'changed' function is triggered
         response = self.client.post(url, {
             'action': 'plugin_deactivate',
             'index': 0,
@@ -193,3 +193,76 @@ class PluginDetailAPITest(PluginMixin, InvenTreeAPITestCase):
         with self.assertRaises(NotFound) as exc:
             check_plugin(plugin_slug=None, plugin_pk='123')
         self.assertEqual(str(exc.exception.detail), "Plugin '123' not installed")
+
+    def test_plugin_settings(self):
+        """Test plugin settings access via the API"""
+
+        # Ensure we have superuser permissions
+        self.user.is_superuser = True
+        self.user.save()
+
+        # Activate the 'sample' plugin via the API
+        cfg = PluginConfig.objects.filter(key='sample').first()
+        url = reverse('api-plugin-detail-activate', kwargs={'pk': cfg.pk})
+        self.client.patch(url, {}, expected_code=200)
+
+        # Valid plugin settings endpoints
+        valid_settings = [
+            'SELECT_PART',
+            'API_KEY',
+            'NUMERICAL_SETTING',
+        ]
+
+        for key in valid_settings:
+            response = self.get(
+                reverse('api-plugin-setting-detail', kwargs={
+                    'plugin': 'sample',
+                    'key': key
+                }))
+
+            self.assertEqual(response.data['key'], key)
+
+        # Test that an invalid setting key raises a 404 error
+        response = self.get(
+            reverse('api-plugin-setting-detail', kwargs={
+                'plugin': 'sample',
+                'key': 'INVALID_SETTING'
+            }),
+            expected_code=404
+        )
+
+        # Test that a protected setting returns hidden value
+        response = self.get(
+            reverse('api-plugin-setting-detail', kwargs={
+                'plugin': 'sample',
+                'key': 'PROTECTED_SETTING'
+            }),
+            expected_code=200
+        )
+
+        self.assertEqual(response.data['value'], '***')
+
+        # Test that we can update a setting value
+        response = self.patch(
+            reverse('api-plugin-setting-detail', kwargs={
+                'plugin': 'sample',
+                'key': 'NUMERICAL_SETTING'
+            }),
+            {
+                'value': 456
+            },
+            expected_code=200
+        )
+
+        self.assertEqual(response.data['value'], '456')
+
+        # Retrieve the value again
+        response = self.get(
+            reverse('api-plugin-setting-detail', kwargs={
+                'plugin': 'sample',
+                'key': 'NUMERICAL_SETTING'
+            }),
+            expected_code=200
+        )
+
+        self.assertEqual(response.data['value'], '456')

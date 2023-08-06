@@ -30,7 +30,9 @@
                 {% if setting.value == '' %}
                 <em style='color: #855;'>{% trans "No value set" %}</em>
                 {% else %}
-                {% if setting.is_choice %}
+                {% if setting.protected %}
+                <strong><span style='color: red;'>***</span> <span class='fas fa-lock icon-red'></span></strong>
+                {% elif setting.is_choice %}
                 <strong>{{ setting.as_choice }}</strong>
                 {% else %}
                 <strong>{{ setting.value }}</strong>
@@ -45,7 +47,7 @@
                     pk='{{ setting.pk }}'
                     setting='{{ setting.key.upper }}'
                     {% if plugin %}plugin='{{ plugin.slug }}'{% endif %}
-                    {% if user_setting or notification_setting %}user='{{request.user.id}}'{% endif %}
+                    {% if user_setting or notification_setting %}user='{{ request.user.id }}'{% endif %}
                     {% if notification_setting %}
                     notification=true
                     method='{{ setting.method }}'

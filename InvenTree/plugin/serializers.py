@@ -53,11 +53,20 @@ class PluginConfigSerializer(serializers.ModelSerializer):
         """Meta for serializer."""
         model = PluginConfig
         fields = [
+            'pk',
             'key',
             'name',
             'active',
             'meta',
             'mixins',
+            'is_builtin',
+            'is_sample',
+        ]
+
+        read_only_fields = [
+            'key',
+            'is_builtin',
+            'is_sample',
         ]
 
     meta = serializers.DictField(read_only=True)
@@ -152,9 +161,15 @@ class PluginConfigInstallSerializer(serializers.Serializer):
             ret['result'] = str(error.output, 'utf-8')
             ret['error'] = True
 
-        # save plugin to plugin_file if installed successfull
+        # save plugin to plugin_file if installed successful
         if success:
+            # Read content of plugin file
+            plg_lines = open(settings.PLUGIN_FILE).readlines()
             with open(settings.PLUGIN_FILE, "a") as plugin_file:
+                # Check if last line has a newline
+                if plg_lines[-1][-1:] != '\n':
+                    plugin_file.write('\n')
+                # Write new plugin to file
                 plugin_file.write(f'{" ".join(install_name)}  # Installed {timezone.now()} by {str(self.context["request"].user)}\n')
 
         # Check for migrations
@@ -165,6 +180,26 @@ class PluginConfigInstallSerializer(serializers.Serializer):
 
 class PluginConfigEmptySerializer(serializers.Serializer):
     """Serializer for a PluginConfig."""
+    ...
+
+
+class PluginActivateSerializer(serializers.Serializer):
+    """Serializer for activating or deactivating a plugin"""
+
+    model = PluginConfig
+
+    active = serializers.BooleanField(
+        required=False, default=True,
+        label=_('Activate Plugin'),
+        help_text=_('Activate this plugin')
+    )
+
+    def update(self, instance, validated_data):
+        """Apply the new 'active' value to the plugin instance"""
+
+        instance.active = validated_data.get('active', True)
+        instance.save()
+        return instance
 
 
 class PluginSettingSerializer(GenericReferencedSettingSerializer):

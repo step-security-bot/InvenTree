@@ -1,15 +1,26 @@
 {% load i18n %}
 
 /* globals
+    createNewModal,
+    global_settings,
+    handleFormError,
+    handleFormSuccess,
+    Html5Qrcode,
+    Html5QrcodeScannerState,
     imageHoverIcon,
+    inventreeGet,
     inventreePut,
+    makeIcon,
+    makeRemoveButton,
     modalEnable,
     modalSetContent,
     modalSetTitle,
     modalSetSubmitText,
     modalShowSubmitButton,
     modalSubmit,
+    showApiError,
     showQuestionDialog,
+    user_settings,
 */
 
 /* exported
@@ -57,8 +68,10 @@ function makeBarcodeInput(placeholderText='', hintText='') {
     return html;
 }
 
-qrScanner = null;
-qrScannerCallback = null;
+// Global variables for qrScanner
+var qrScanner = null;
+var qrScannerCallback = null;
+
 
 function startQrScanner() {
     $('#barcode_scan_video_container').show();
@@ -98,7 +111,7 @@ function onBarcodeScanClicked(e) {
 
 function onCameraAvailable(hasCamera, options) {
     if (hasCamera && global_settings.BARCODE_WEBCAM_SUPPORT) {
-        // Camera is only acccessible if page is served over secure connection
+        // Camera is only accessible if page is served over secure connection
         if (window.isSecureContext == true) {
             qrScanner = new Html5Qrcode('barcode_scan_video', {
                 useBarCodeDetectorIfSupported: true,
@@ -170,7 +183,7 @@ function postBarcodeData(barcode_data, options={}) {
                     if (options.onError400) {
                         options.onError400(xhr.responseJSON, options);
                     } else {
-                        console.log(xhr);
+                        console.error(xhr);
                         data = xhr.responseJSON || {};
                         showBarcodeMessage(modal, data.error || '{% trans "Server error" %}');
                     }
@@ -279,7 +292,7 @@ function getBarcodeData(modal) {
  */
 function barcodeDialog(title, options={}) {
 
-    var modal = createNewModal();
+    var modal = options.modal || createNewModal();
 
     options.modal = modal;
 
@@ -571,7 +584,7 @@ function barcodeCheckInStockItems(location_id, options={}) {
         });
     }
 
-    var table = `<div class='container' id='items-table-div' style='width: 80%; float: left;'></div>`;
+    var table = `<div class='container' id='items-table-div' style='float: left;'></div>`;
 
     // Extra form fields
     var extra = makeNotesField();
@@ -589,6 +602,7 @@ function barcodeCheckInStockItems(location_id, options={}) {
             onShow: function() {
             },
             extraFields: extra,
+            modal: modal,
             onSubmit: function() {
 
                 // Called when the 'check-in' button is pressed
@@ -749,7 +763,7 @@ function scanItemsIntoLocation(item_list, options={}) {
     // Extra form fields
     var extra = makeNotesField();
 
-    // Header contentfor
+    // Header content
     var header = `
     <div id='header-div'>
     </div>
@@ -776,6 +790,7 @@ function scanItemsIntoLocation(item_list, options={}) {
         {
             headerContent: header,
             extraFields: extra,
+            modal: modal,
             preShow: function() {
                 modalSetSubmitText(modal, '{% trans "Check In" %}');
                 modalEnable(modal, false);

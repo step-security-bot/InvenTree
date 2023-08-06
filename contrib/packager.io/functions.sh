@@ -155,11 +155,11 @@ function detect_envs() {
 
 function create_initscripts() {
 
-  # Make sure python env exsists
+  # Make sure python env exists
   if test -f "${APP_HOME}/env"; then
-    echo "# python enviroment already present - skipping"
+    echo "# python environment already present - skipping"
   else
-    echo "# Setting up python enviroment"
+    echo "# Setting up python environment"
     sudo -u ${APP_USER} --preserve-env=$SETUP_ENVS bash -c "cd ${APP_HOME} && ${SETUP_PYTHON} -m venv env"
     sudo -u ${APP_USER} --preserve-env=$SETUP_ENVS bash -c "cd ${APP_HOME} && env/bin/pip install invoke wheel"
 
@@ -235,7 +235,8 @@ function update_or_install() {
 
   # Run update as app user
   echo "# Updating InvenTree"
-  sudo -u ${APP_USER} --preserve-env=$SETUP_ENVS bash -c "cd ${APP_HOME} && invoke update | sed -e 's/^/# inv update| /;'"
+  sudo -u ${APP_USER} --preserve-env=$SETUP_ENVS bash -c "cd ${APP_HOME} && pip install wheel"
+  sudo -u ${APP_USER} --preserve-env=$SETUP_ENVS bash -c "cd ${APP_HOME} && invoke update --no-frontend | sed -e 's/^/# inv update| /;'"
 
   # Make sure permissions are correct again
   echo "# Set permissions for data dir and media: ${DATA_DIR}"

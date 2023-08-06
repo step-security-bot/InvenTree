@@ -4,11 +4,31 @@
 /* globals
     companyFormFields,
     constructForm,
+    formatCurrency,
+    getFormFieldValue,
+    global_settings,
+    handleFormErrors,
+    handleFormSuccess,
     imageHoverIcon,
+    inventreeLoad,
+    inventreePut,
     loadTableFilters,
+    makeDeleteButton,
+    makeEditButton,
+    makeIconBadge,
+    makeIconButton,
+    makeRemoveButton,
+    reloadBootstrapTable,
+    renderDate,
     renderLink,
+    returnOrderLineItemStatusDisplay,
     returnOrderStatusDisplay,
     setupFilterList,
+    showApiError,
+    showAlertDialog,
+    thumbnailImage,
+    wrapButtons,
+    yesNoLabel,
 */
 
 /* exported
@@ -60,6 +80,18 @@ function returnOrderFields(options={}) {
         },
         contact: {
             icon: 'fa-user',
+            adjustFilters: function(filters) {
+                let customer = getFormFieldValue('customer', {}, {modal: options.modal});
+
+                if (customer) {
+                    filters.company = customer;
+                }
+
+                return filters;
+            }
+        },
+        address: {
+            icon: 'fa-map',
             adjustFilters: function(filters) {
                 let customer = getFormFieldValue('customer', {}, {modal: options.modal});
 
@@ -229,9 +261,6 @@ function loadReturnOrderTable(table, options={}) {
         disablePagination: is_calendar,
         formatNoMatches: function() {
             return '{% trans "No return orders found" %}';
-        },
-        onRefresh: function() {
-            loadReturnOrderTable(table, options);
         },
         onLoadSuccess: function() {
             // TODO

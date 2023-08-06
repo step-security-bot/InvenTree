@@ -1,13 +1,24 @@
 """Plugin mixin class for SettingsMixin."""
 import logging
+from typing import TYPE_CHECKING, Dict
 
 from django.db.utils import OperationalError, ProgrammingError
 
 logger = logging.getLogger('inventree')
 
+# import only for typechecking, otherwise this throws a model is unready error
+if TYPE_CHECKING:
+    from common.models import SettingsKeyType
+else:
+    class SettingsKeyType:
+        """Dummy class, so that python throws no error"""
+        pass
+
 
 class SettingsMixin:
     """Mixin that enables global settings for the plugin."""
+
+    SETTINGS: Dict[str, SettingsKeyType] = {}
 
     class MixinMeta:
         """Meta for mixin."""
@@ -56,7 +67,7 @@ class SettingsMixin:
         """
         from plugin.models import PluginSetting
 
-        return PluginSetting.get_setting(key, plugin=self, cache=cache)
+        return PluginSetting.get_setting(key, plugin=self.plugin_config(), cache=cache)
 
     def set_setting(self, key, value, user=None):
         """Set plugin setting value by key."""
@@ -73,3 +84,16 @@ class SettingsMixin:
             return
 
         PluginSetting.set_setting(key, value, user, plugin=plugin)
+
+    def check_settings(self):
+        """Check if all required settings for this machine are defined.
+
+        Warning: This method cannot be used in the __init__ function of the plugin
+
+        Returns:
+            is_valid: Are all required settings defined
+            missing_settings: List of all settings that are missing (empty if is_valid is 'True')
+        """
+        from plugin.models import PluginSetting
+
+        return PluginSetting.check_all_settings(settings_definition=self.settings, plugin=self.plugin_config())

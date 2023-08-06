@@ -40,7 +40,7 @@ The InvenTree server tries to locate the `config.yaml` configuration file on sta
 The configuration file *template* can be found on [GitHub](https://github.com/inventree/InvenTree/blob/master/InvenTree/config_template.yaml)
 
 !!! info "Template File"
-    The default configuration file (as defined by the template linked above) will be copied to the specifed configuration file location on first run, if a configuration file is not found in that location.
+    The default configuration file (as defined by the template linked above) will be copied to the specified configuration file location on first run, if a configuration file is not found in that location.
 
 !!! tip "Restart Server"
     The contents of the configuration file are read when the InevnTree server first launches. If any changes are made to the configuration file, ensure that the server is restarted, so that the changes can be made operational.
@@ -53,9 +53,18 @@ The following basic options are available:
 | --- | --- | --- | --- |
 | INVENTREE_DEBUG | debug | Enable [debug mode](./intro.md#debug-mode) | True |
 | INVENTREE_LOG_LEVEL | log_level | Set level of logging to terminal | WARNING |
-| INVENTREE_TIMZONE | timezome | Server timezone | UTC |
+| INVENTREE_TIMEZONE | timezone | Server timezone | UTC |
 | ADMIN_URL | admin_url | URL for accessing [admin interface](../settings/admin.md) | admin |
 | INVENTREE_LANGUAGE | language | Default language | en-us |
+| INVENTREE_BASE_URL | base_url | Server base URL | *Not specified* |
+
+### Base URL Configuration
+
+The base URL of the InvenTree site is required for constructing absolute URLs in a number of circumstances. To construct a URL, the InvenTree iterates through the following options in decreasing order of importance:
+
+1. Static configuration (i.e. set using environment variable or configuration file as above)
+2. Global settings (i.e. configured at run-time in the [global settings](../settings/global.md))
+3. Using the hostname supplied by the user request
 
 ## Administrator Account
 
@@ -146,8 +155,15 @@ The following email settings are available:
 | INVENTREE_EMAIL_PASSWORD | email.password | Email account password | *Not specified* |
 | INVENTREE_EMAIL_TLS | email.tls | Enable TLS support | False |
 | INVENTREE_EMAIL_SSL | email.ssl | Enable SSL support | False |
-| INVENTREE_EMAIL_SENDER | email.sender | Name of sender | *Not specified* |
+| INVENTREE_EMAIL_SENDER | email.sender | Sending email address | *Not specified* |
 | INVENTREE_EMAIL_PREFIX | email.prefix | Prefix for subject text | [InvenTree] |
+
+### Sender Email
+
+The "sender" email address is the address from which InvenTree emails are sent (by default) and must be specified for outgoing emails to function:
+
+!!! info "Fallback"
+     If `INVENTREE_EMAIL_SENDER` is not provided, the system will fall back to `INVENTREE_EMAIL_USERNAME` (if the username is a valid email address)
 
 ## Supported Currencies
 
@@ -182,9 +198,8 @@ InvenTree requires some external directories for storing files:
 
 | Environment Variable | Configuration File | Description | Default |
 | --- | --- | --- | --- |
-| INVENTREE_STATIC_ROOT | static_root | List of allowed hosts | *Not specified* |
-| INVENTREE_MEDIA_ROOT | media_root | Allow all remote URLS for CORS checks | *Not specified* |
-| INVENTREE_BACKUP_DIR | backup_dir | List of whitelisted CORS URLs | *Not specified* |
+| INVENTREE_STATIC_ROOT | static_root | [Static files](./serving_files.md#static-files) directory | *Not specified* |
+| INVENTREE_MEDIA_ROOT | media_root | [Media files](./serving_files.md#media-files) directory | *Not specified* |
 
 !!! tip "Serving Files"
     Read the [Serving Files](./serving_files.md) section for more information on hosting *static* and *media* files

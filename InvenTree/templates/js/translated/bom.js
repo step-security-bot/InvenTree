@@ -1,16 +1,47 @@
 {% load i18n %}
 
 /* globals
+    addFieldErrorMessage,
+    constructField,
     constructForm,
+    constructFormBody,
+    createNewModal,
+    enableSubmitButton,
     exportFormatOptions,
+    formatDecimal,
+    formatPriceRange,
+    getApiEndpointOptions,
+    getFormFieldValue,
+    handleFormErrors,
+    handleFormSuccess,
     imageHoverIcon,
+    initializeRelatedField,
     inventreeGet,
+    inventreeLoad,
     inventreePut,
+    inventreeSave,
     launchModalForm,
     loadTableFilters,
+    makeDeleteButton,
+    makeEditButton,
+    makeIcon,
+    makeIconBadge,
+    makeIconButton,
+    makeInfoButton,
     makePartIcons,
+    makeRemoveButton,
+    modalSetContent,
+    partFields,
+    partGroups,
+    reloadBootstrapTable,
     renderLink,
     setupFilterList,
+    shortenString,
+    showApiError,
+    thumbnailImage,
+    updateFieldValue,
+    withTitle,
+    wrapButtons,
     yesNoLabel,
 */
 
@@ -226,7 +257,7 @@ function submitBomTable(part_id, options={}) {
         items: rows,
     };
 
-    var options = {
+    var opts = {
         nested: {
             items: idx_values,
         }
@@ -247,7 +278,7 @@ function submitBomTable(part_id, options={}) {
             error: function(xhr) {
                 switch (xhr.status) {
                 case 400:
-                    handleFormErrors(xhr.responseJSON, fields, options);
+                    handleFormErrors(xhr.responseJSON, fields, opts);
                     break;
                 default:
                     showApiError(xhr, url);
@@ -756,17 +787,17 @@ function deleteBomItems(items, options={}) {
 }
 
 
+/* Load a BOM table with some configurable options.
+ *
+ * Following options are available:
+ * editable      - Should the BOM table be editable?
+ * bom_url       - Address to request BOM data from
+ * part_url      - Address to request Part data from
+ * parent_id     - Parent ID of the owning part
+ *
+ * BOM data are retrieved from the server via AJAX query
+ */
 function loadBomTable(table, options={}) {
-    /* Load a BOM table with some configurable options.
-     *
-     * Following options are available:
-     * editable      - Should the BOM table be editable?
-     * bom_url       - Address to request BOM data from
-     * part_url      - Address to request Part data from
-     * parent_id     - Parent ID of the owning part
-     *
-     * BOM data are retrieved from the server via AJAX query
-     */
 
     var params = {
         part: options.parent_id,
@@ -787,7 +818,24 @@ function loadBomTable(table, options={}) {
 
     Object.assign(filters, params);
 
-    setupFilterList('bom', $(table));
+    setupFilterList('bom', $(table), '#filter-list-bom', {
+        custom_actions: [{
+            label: 'actions',
+            actions: [{
+                label: 'delete',
+                title: '{% trans "Delete items" %}',
+                icon: 'fa-trash-alt icon-red',
+                permission: 'part.change',
+                callback: function(data) {
+                    deleteBomItems(data, {
+                        success: function() {
+                            reloadBootstrapTable('#bom-table');
+                        }
+                    });
+                }
+            }]
+        }]
+    });
 
     function availableQuantity(row) {
 
@@ -857,6 +905,18 @@ function loadBomTable(table, options={}) {
             title: '{% trans "Part" %}',
             sortable: true,
             switchable: false,
+            sorter: function(_valA, _valB, rowA, rowB) {
+                let name_a = rowA.sub_part_detail.full_name;
+                let name_b = rowB.sub_part_detail.full_name;
+
+                if (name_a > name_b) {
+                    return 1;
+                } else if (name_a < name_b) {
+                    return -1;
+                } else {
+                    return 0;
+                }
+            },
             formatter: function(value, row) {
                 var url = `/part/${row.sub_part}/`;
                 var html = '';
@@ -942,37 +1002,11 @@ function loadBomTable(table, options={}) {
             }
 
             if (row.overage) {
-                text += `<small> (${row.overage})    </small>`;
+                text += `<small> (+${row.overage})</small>`;
             }
 
             return text;
         },
-        footerFormatter: function(data) {
-
-            // Top-level BOM count
-            var top_total = 0;
-
-            // Total BOM count
-            var all_total = 0;
-
-            data.forEach(function(row) {
-                var q = +row['quantity'] || 0;
-
-                all_total += q;
-
-                if (row.part == options.parent_id) {
-                    top_total += q;
-                }
-            });
-
-            var total = `${formatDecimal(top_total)}`;
-
-            if (top_total != all_total) {
-                total += ` / ${formatDecimal(all_total)}`;
-            }
-
-            return total;
-        }
     });
 
     cols.push({
@@ -1092,7 +1126,7 @@ function loadBomTable(table, options={}) {
 
             if (any_pricing) {
 
-                var html = formatPriceRange(min_price, max_price);
+                let html = formatPriceRange(min_price, max_price);
 
                 if (complete_pricing) {
                     html += makeIconBadge(
@@ -1109,7 +1143,7 @@ function loadBomTable(table, options={}) {
                 return html;
 
             } else {
-                var html = '<em>{% trans "No pricing available" %}</em>';
+                let html = '<em>{% trans "No pricing available" %}</em>';
                 html += makeIconBadge('fa-times-circle icon-red');
 
                 return html;
@@ -1133,7 +1167,7 @@ function loadBomTable(table, options={}) {
 
             var available_stock = availableQuantity(row);
 
-            var text = `${available_stock}`;
+            var text = renderLink(`${available_stock}`, url);
 
             if (row.sub_part_detail && row.sub_part_detail.units) {
                 text += ` <small>${row.sub_part_detail.units}</small>`;
@@ -1164,7 +1198,7 @@ function loadBomTable(table, options={}) {
                 );
             }
 
-            return renderLink(text, url);
+            return text;
         }
     });
 

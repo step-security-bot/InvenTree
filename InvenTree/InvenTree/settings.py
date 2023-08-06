@@ -17,10 +17,12 @@ from pathlib import Path
 
 import django.conf.locale
 import django.core.exceptions
+from django.core.validators import URLValidator
 from django.http import Http404
 from django.utils.translation import gettext_lazy as _
 
 import moneyed
+from dotenv import load_dotenv
 
 from InvenTree.config import get_boolean_setting, get_custom_file, get_setting
 from InvenTree.sentry import default_sentry_dsn, init_sentry
@@ -31,7 +33,7 @@ from . import config
 INVENTREE_NEWS_URL = 'https://inventree.org/news/feed.atom'
 
 # Determine if we are running in "test" mode e.g. "manage.py test"
-TESTING = 'test' in sys.argv
+TESTING = 'test' in sys.argv or 'TESTING' in os.environ
 
 if TESTING:
 
@@ -64,9 +66,18 @@ BASE_DIR = config.get_base_dir()
 # Load configuration data
 CONFIG = config.load_config_data(set_cache=True)
 
+# Load VERSION data if it exists
+version_file = BASE_DIR.parent.joinpath('VERSION')
+if version_file.exists():
+    print('load version from file')
+    load_dotenv(version_file)
+
 # Default action is to run the system in Debug mode
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = get_boolean_setting('INVENTREE_DEBUG', 'debug', True)
+
+ENABLE_CLASSIC_FRONTEND = get_boolean_setting('INVENTREE_CLASSIC_FRONTEND', 'classic_frontend', True)
+ENABLE_PLATFORM_FRONTEND = get_boolean_setting('INVENTREE_PLATFORM_FRONTEND', 'platform_frontend', True)
 
 # Configure logging settings
 log_level = get_setting('INVENTREE_LOG_LEVEL', 'log_level', 'WARNING')
@@ -188,13 +199,15 @@ INSTALLED_APPS = [
     'build.apps.BuildConfig',
     'common.apps.CommonConfig',
     'company.apps.CompanyConfig',
+    'plugin.apps.PluginAppConfig',          # Plugin app runs before all apps that depend on the isPluginRegistryLoaded function
     'label.apps.LabelConfig',
     'order.apps.OrderConfig',
     'part.apps.PartConfig',
     'report.apps.ReportConfig',
     'stock.apps.StockConfig',
     'users.apps.UsersConfig',
-    'plugin.apps.PluginAppConfig',
+    'web',
+    'generic',
     'InvenTree.apps.InvenTreeConfig',       # InvenTree app runs last
 
     # Core django modules
@@ -224,6 +237,8 @@ INSTALLED_APPS = [
     'django_q',
     'formtools',                            # Form wizard tools
     'dbbackup',                             # Backups - django-dbbackup
+    'taggit',                               # Tagging
+    'flags',                                # Flagging - django-flags
 
     'allauth',                              # Base app for SSO
     'allauth.account',                      # Extend user with accounts
@@ -234,6 +249,8 @@ INSTALLED_APPS = [
     'django_otp.plugins.otp_static',        # Backup codes
 
     'allauth_2fa',                          # MFA flow for allauth
+    'dj_rest_auth',                         # Authentication APIs - dj-rest-auth
+    'dj_rest_auth.registration',            # Registration APIs - dj-rest-auth'
     'drf_spectacular',                      # API documentation
 
     'django_ical',                          # For exporting calendars
@@ -263,6 +280,7 @@ AUTHENTICATION_BACKENDS = CONFIG.get('authentication_backends', [
     'django.contrib.auth.backends.RemoteUserBackend',           # proxy login
     'django.contrib.auth.backends.ModelBackend',
     'allauth.account.auth_backends.AuthenticationBackend',      # SSO login via external providers
+    "sesame.backends.ModelBackend",                             # Magic link login django-sesame
 ])
 
 DEBUG_TOOLBAR_ENABLED = DEBUG and get_setting('INVENTREE_DEBUG_TOOLBAR', 'debug_toolbar', False)
@@ -369,6 +387,23 @@ if DEBUG:
     # Enable browsable API if in DEBUG mode
     REST_FRAMEWORK['DEFAULT_RENDERER_CLASSES'].append('rest_framework.renderers.BrowsableAPIRenderer')
 
+# dj-rest-auth
+# JWT switch
+USE_JWT = get_boolean_setting('INVENTREE_USE_JWT', 'use_jwt', False)
+REST_USE_JWT = USE_JWT
+OLD_PASSWORD_FIELD_ENABLED = True
+REST_AUTH_REGISTER_SERIALIZERS = {'REGISTER_SERIALIZER': 'InvenTree.forms.CustomRegisterSerializer'}
+
+# JWT settings - rest_framework_simplejwt
+if USE_JWT:
+    JWT_AUTH_COOKIE = 'inventree-auth'
+    JWT_AUTH_REFRESH_COOKIE = 'inventree-token'
+    REST_FRAMEWORK['DEFAULT_AUTHENTICATION_CLASSES'] + (
+        'dj_rest_auth.jwt_auth.JWTCookieAuthentication',
+    )
+    INSTALLED_APPS.append('rest_framework_simplejwt')
+
+# WSGI default setting
 SPECTACULAR_SETTINGS = {
     'TITLE': 'InvenTree API',
     'DESCRIPTION': 'API for InvenTree - the intuitive open source inventory management system',
@@ -478,7 +513,7 @@ if "postgres" in db_engine:  # pragma: no cover
     if "connect_timeout" not in db_options:
         # The DB server is in the same data center, it should not take very
         # long to connect to the database server
-        # # seconds, 2 is minium allowed by libpq
+        # # seconds, 2 is minimum allowed by libpq
         db_options["connect_timeout"] = int(
             get_setting('INVENTREE_DB_TIMEOUT', 'database.timeout', 2)
         )
@@ -571,10 +606,14 @@ DATABASES = {
 REMOTE_LOGIN = get_boolean_setting('INVENTREE_REMOTE_LOGIN', 'remote_login_enabled', False)
 REMOTE_LOGIN_HEADER = get_setting('INVENTREE_REMOTE_LOGIN_HEADER', 'remote_login_header', 'REMOTE_USER')
 
+# Magic login django-sesame
+SESAME_MAX_AGE = 300
+LOGIN_REDIRECT_URL = "/platform/logged-in/"
+
 # sentry.io integration for error reporting
 SENTRY_ENABLED = get_boolean_setting('INVENTREE_SENTRY_ENABLED', 'sentry_enabled', False)
 
-# Default Sentry DSN (can be overriden if user wants custom sentry integration)
+# Default Sentry DSN (can be overridden if user wants custom sentry integration)
 SENTRY_DSN = get_setting('INVENTREE_SENTRY_DSN', 'sentry_dsn', default_sentry_dsn())
 SENTRY_SAMPLE_RATE = float(get_setting('INVENTREE_SENTRY_SAMPLE_RATE', 'sentry_sample_rate', 0.1))
 
@@ -596,7 +635,7 @@ cache_port = get_setting('INVENTREE_CACHE_PORT', 'cache.port', '6379', typecast=
 if cache_host:  # pragma: no cover
     # We are going to rely upon a possibly non-localhost for our cache,
     # so don't wait too long for the cache as nothing in the cache should be
-    # irreplacable.
+    # irreplaceable.
     _cache_options = {
         "CLIENT_CLASS": "django_redis.client.DefaultClient",
         "SOCKET_CONNECT_TIMEOUT": int(os.getenv("CACHE_CONNECT_TIMEOUT", "2")),
@@ -707,6 +746,8 @@ LANGUAGE_CODE = get_setting('INVENTREE_LANGUAGE', 'language', 'en-us')
 LANGUAGE_COOKIE_AGE = 2592000
 
 # If a new language translation is supported, it must be added here
+# After adding a new language, run the following command:
+# python manage.py makemessages -l <language_code> -e html,js,py --nowrap
 LANGUAGES = [
     ('cs', _('Czech')),
     ('da', _('Danish')),
@@ -716,8 +757,10 @@ LANGUAGES = [
     ('es', _('Spanish')),
     ('es-mx', _('Spanish (Mexican)')),
     ('fa', _('Farsi / Persian')),
+    ('fi', _('Finnish')),
     ('fr', _('French')),
     ('he', _('Hebrew')),
+    ('hi', _('Hindi')),
     ('hu', _('Hungarian')),
     ('it', _('Italian')),
     ('ja', _('Japanese')),
@@ -726,14 +769,15 @@ LANGUAGES = [
     ('no', _('Norwegian')),
     ('pl', _('Polish')),
     ('pt', _('Portuguese')),
-    ('pt-BR', _('Portuguese (Brazilian)')),
+    ('pt-br', _('Portuguese (Brazilian)')),
     ('ru', _('Russian')),
     ('sl', _('Slovenian')),
     ('sv', _('Swedish')),
     ('th', _('Thai')),
     ('tr', _('Turkish')),
     ('vi', _('Vietnamese')),
-    ('zh-hans', _('Chinese')),
+    ('zh-hans', _('Chinese (Simplified)')),
+    ('zh-hant', _('Chinese (Traditional)')),
 ]
 
 # Testing interface translations
@@ -762,6 +806,11 @@ CURRENCIES = get_setting(
     typecast=list,
 )
 
+# Ensure that at least one currency value is available
+if len(CURRENCIES) == 0:  # pragma: no cover
+    logger.warning("No currencies selected: Defaulting to USD")
+    CURRENCIES = ['USD']
+
 # Maximum number of decimal places for currency rendering
 CURRENCY_DECIMAL_PLACES = 6
 
@@ -785,6 +834,10 @@ EMAIL_USE_TLS = get_boolean_setting('INVENTREE_EMAIL_TLS', 'email.tls', False)
 EMAIL_USE_SSL = get_boolean_setting('INVENTREE_EMAIL_SSL', 'email.ssl', False)
 
 DEFAULT_FROM_EMAIL = get_setting('INVENTREE_EMAIL_SENDER', 'email.sender', '')
+
+# If "from" email not specified, default to the username
+if not DEFAULT_FROM_EMAIL:
+    DEFAULT_FROM_EMAIL = get_setting('INVENTREE_EMAIL_USERNAME', 'email.username', '')
 
 EMAIL_USE_LOCALTIME = False
 EMAIL_TIMEOUT = 60
@@ -832,6 +885,8 @@ ACCOUNT_LOGIN_ATTEMPTS_LIMIT = get_setting('INVENTREE_LOGIN_ATTEMPTS', 'login_at
 ACCOUNT_DEFAULT_HTTP_PROTOCOL = get_setting('INVENTREE_LOGIN_DEFAULT_HTTP_PROTOCOL', 'login_default_protocol', 'http')
 ACCOUNT_LOGOUT_ON_PASSWORD_CHANGE = True
 ACCOUNT_PREVENT_ENUMERATION = True
+# 2FA
+REMOVE_SUCCESS_URL = 'settings'
 
 # override forms / adapters
 ACCOUNT_FORMS = {
@@ -902,11 +957,21 @@ PLUGINS_ENABLED = get_boolean_setting('INVENTREE_PLUGINS_ENABLED', 'plugins_enab
 PLUGIN_FILE = config.get_plugin_file()
 
 # Plugin test settings
-PLUGIN_TESTING = get_setting('INVENTREE_PLUGIN_TESTING', 'PLUGIN_TESTING', TESTING)                     # Are plugins beeing tested?
+PLUGIN_TESTING = get_setting('INVENTREE_PLUGIN_TESTING', 'PLUGIN_TESTING', TESTING)                     # Are plugins being tested?
 PLUGIN_TESTING_SETUP = get_setting('INVENTREE_PLUGIN_TESTING_SETUP', 'PLUGIN_TESTING_SETUP', False)     # Load plugins from setup hooks in testing?
 PLUGIN_TESTING_EVENTS = False                                                                           # Flag if events are tested right now
 PLUGIN_RETRY = get_setting('INVENTREE_PLUGIN_RETRY', 'PLUGIN_RETRY', 5)                                 # How often should plugin loading be tried?
 PLUGIN_FILE_CHECKED = False                                                                             # Was the plugin file checked?
+
+# Site URL can be specified statically, or via a run-time setting
+SITE_URL = get_setting('INVENTREE_SITE_URL', 'site_url', None)
+
+if SITE_URL:
+    logger.info(f"Site URL: {SITE_URL}")
+
+    # Check that the site URL is valid
+    validator = URLValidator()
+    validator(SITE_URL)
 
 # User interface customization values
 CUSTOM_LOGO = get_custom_file('INVENTREE_CUSTOM_LOGO', 'customize.logo', 'custom logo', lookup_media=True)
@@ -918,3 +983,23 @@ if DEBUG:
 
 logger.info(f"MEDIA_ROOT: '{MEDIA_ROOT}'")
 logger.info(f"STATIC_ROOT: '{STATIC_ROOT}'")
+
+# Flags
+FLAGS = {
+    'EXPERIMENTAL': [
+        {'condition': 'boolean', 'value': DEBUG},
+        {'condition': 'parameter', 'value': 'experimental='},
+    ],  # Should experimental features be turned on?
+    'NEXT_GEN': [
+        {'condition': 'parameter', 'value': 'ngen='},
+    ],  # Should next-gen features be turned on?
+}
+
+# Get custom flags from environment/yaml
+CUSTOM_FLAGS = get_setting('INVENTREE_FLAGS', 'flags', None, typecast=dict)
+if CUSTOM_FLAGS:
+    if not isinstance(CUSTOM_FLAGS, dict):
+        logger.error(f"Invalid custom flags, must be valid dict: {CUSTOM_FLAGS}")
+    else:
+        logger.info(f"Custom flags: {CUSTOM_FLAGS}")
+        FLAGS.update(CUSTOM_FLAGS)

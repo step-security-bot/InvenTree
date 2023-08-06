@@ -1,19 +1,17 @@
 """Apps file for plugin app.
 
-This initializes the plugin mechanisms and handles reloading throught the lifecycle.
+This initializes the plugin mechanisms and handles reloading throughout the lifecycle.
 The main code for plugin special sauce is in the plugin registry in `InvenTree/plugin/registry.py`.
 """
 
 import logging
 
 from django.apps import AppConfig
-from django.utils.translation import gettext_lazy as _
 
 from maintenance_mode.core import set_maintenance_mode
 
-from InvenTree.ready import canAppAccessDatabase
+from InvenTree.ready import canAppAccessDatabase, isInMainThread
 from plugin import registry
-from plugin.helpers import check_git_version, log_error
 
 logger = logging.getLogger('inventree')
 
@@ -25,6 +23,10 @@ class PluginAppConfig(AppConfig):
 
     def ready(self):
         """The ready method is extended to initialize plugins."""
+        # skip loading if we run in a background thread
+        if not isInMainThread():
+            return
+
         if not canAppAccessDatabase(allow_test=True, allow_plugins=True):
             logger.info("Skipping plugin loading sequence")  # pragma: no cover
         else:
@@ -47,9 +49,3 @@ class PluginAppConfig(AppConfig):
                 # drop out of maintenance
                 # makes sure we did not have an error in reloading and maintenance is still active
                 set_maintenance_mode(False)
-
-        # check git version
-        registry.git_is_modern = check_git_version()
-
-        if not registry.git_is_modern:  # pragma: no cover  # simulating old git seems not worth it for coverage
-            log_error(_('Your environment has an outdated git version. This prevents InvenTree from loading plugin details.'), 'load')

@@ -52,6 +52,82 @@ onPanelLoad('pricing', function() {
     });
 });
 
+// Javascript for units panel
+onPanelLoad('units', function() {
+
+    console.log("units panel");
+
+    // Construct the "units" table
+    $('#physical-units-table').bootstrapTable({
+        url: '{% url "api-custom-unit-list" %}',
+        search: true,
+        columns: [
+            {
+                field: 'name',
+                title: '{% trans "Name" %}',
+            },
+            {
+                field: 'definition',
+                title: '{% trans "Definition" %}',
+            },
+            {
+                field: 'symbol',
+                title: '{% trans "Symbol" %}',
+                formatter: function(value, row) {
+                    let html = value;
+                    let buttons = '';
+
+                    buttons += makeEditButton('button-units-edit', row.pk, '{% trans "Edit" %}');
+                    buttons += makeDeleteButton('button-units-delete', row.pk, '{% trans "Delete" %}');
+
+                    html += wrapButtons(buttons);
+                    return html;
+                }
+            },
+        ]
+    });
+
+    // Callback to edit a custom unit
+    $('#physical-units-table').on('click', '.button-units-edit', function() {
+        let pk = $(this).attr('pk');
+
+        constructForm(`{% url "api-custom-unit-list" %}${pk}/`, {
+            title: '{% trans "Edit Custom Unit" %}',
+            fields: {
+                name: {},
+                definition: {},
+                symbol: {},
+            },
+            refreshTable: '#physical-units-table',
+        });
+    });
+
+    // Callback to delete a custom unit
+    $('#physical-units-table').on('click', '.button-units-delete', function() {
+        let pk = $(this).attr('pk');
+
+        constructForm(`{% url "api-custom-unit-list" %}${pk}/`, {
+            title: '{% trans "Delete Custom Unit" %}',
+            method: 'DELETE',
+            refreshTable: '#physical-units-table',
+        });
+    });
+
+    // Callback to create a new custom unit
+    $('#custom-unit-create').click(function() {
+        constructForm('{% url "api-custom-unit-list" %}', {
+            fields: {
+                name: {},
+                definition: {},
+                symbol: {},
+            },
+            title: '{% trans "New Custom Unit" %}',
+            method: 'POST',
+            refreshTable: '#physical-units-table',
+        });
+    });
+});
+
 // Javascript for project codes panel
 onPanelLoad('project-codes', function() {
 
@@ -272,7 +348,6 @@ onPanelLoad('category', function() {
         });
     }
 
-
     // Initially load table with *all* categories
     loadTemplateTable();
 
@@ -303,108 +378,27 @@ onPanelLoad('category', function() {
     });
 });
 
+// Javascript for the Part parameters settings panel
+onPanelLoad('part-parameters', function() {
 
-// Javascript for the Part settings panel
-onPanelLoad('parts', function() {
-    $("#param-table").inventreeTable({
-        url: "{% url 'api-part-parameter-template-list' %}",
-        queryParams: {
-            ordering: 'name',
-        },
-        formatNoMatches: function() { return '{% trans "No part parameter templates found" %}'; },
-        columns: [
-            {
-                field: 'pk',
-                title: '{% trans "ID" %}',
-                visible: false,
-                switchable: false,
-            },
-            {
-                field: 'name',
-                title: '{% trans "Name" %}',
-                sortable: true,
-            },
-            {
-                field: 'units',
-                title: '{% trans "Units" %}',
-                sortable: true,
-                switchable: true,
-            },
-            {
-                field: 'description',
-                title: '{% trans "Description" %}',
-                sortable: false,
-                switchable: true,
-            },
-            {
-                formatter: function(value, row, index, field) {
-                    var bEdit = "<button title='{% trans "Edit Template" %}' class='template-edit btn btn-outline-secondary' type='button' pk='" + row.pk + "'><span class='fas fa-edit icon-green'></span></button>";
-                    var bDel = "<button title='{% trans "Delete Template" %}' class='template-delete btn btn-outline-secondary' type='button' pk='" + row.pk + "'><span class='fas fa-trash-alt icon-red'></span></button>";
-
-                    var html = "<div class='btn-group float-right' role='group'>" + bEdit + bDel + "</div>";
-
-                    return html;
-                }
-            }
-        ]
-    });
+    loadPartParameterTemplateTable("#param-table", {});
 
     $("#new-param").click(function() {
         constructForm('{% url "api-part-parameter-template-list" %}', {
-            fields: {
-                name: {},
-                units: {},
-                description: {},
-            },
+            fields: partParameterTemplateFields(),
             method: 'POST',
             title: '{% trans "Create Part Parameter Template" %}',
             refreshTable: '#param-table',
         });
     });
+});
 
-    $("#param-table").on('click', '.template-edit', function() {
-        var button = $(this);
-        var pk = button.attr('pk');
-
-        constructForm(
-            `/api/part/parameter/template/${pk}/`,
-            {
-                fields: {
-                    name: {},
-                    units: {},
-                    description: {},
-                },
-                title: '{% trans "Edit Part Parameter Template" %}',
-                refreshTable: '#param-table',
-            }
-        );
-    });
-
-    $("#param-table").on('click', '.template-delete', function() {
-        var button = $(this);
-        var pk = button.attr('pk');
-
-        var html = `
-        <div class='alert alert-block alert-danger'>
-            {% trans "Any parameters which reference this template will also be deleted" %}
-        </div>`;
-
-        constructForm(
-            `/api/part/parameter/template/${pk}/`,
-            {
-                method: 'DELETE',
-                preFormContent: html,
-                title: '{% trans "Delete Part Parameter Template" %}',
-                refreshTable: '#param-table',
-            }
-        );
-    });
-
+// Javascript for the Part settings panel
+onPanelLoad('parts', function() {
     $("#import-part").click(function() {
         launchModalForm("{% url 'api-part-import' %}?reset", {});
     });
 });
-
 
 // Javascript for the Stocktake settings panel
 onPanelLoad('stocktake', function() {
@@ -466,4 +460,22 @@ onPanelLoad('stocktake', function() {
         });
     });
     {% endif %}
+});
+
+// Javascript for plugins panel
+onPanelLoad('plugin', function() {
+
+{% plugins_enabled as plug %}
+
+    loadPluginTable('#plugin-table', {
+        custom: {% js_bool plug %},
+    });
+
+{% if plug %}
+    // Callback to install new plugin
+    $("#install-plugin").click(function() {
+        installPlugin();
+    });
+
+{% endif %}
 });

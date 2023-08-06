@@ -21,48 +21,50 @@ Panel content can be rendered by returning HTML directly, or by rendering from a
 
 Each plugin can register templates simply by providing a 'templates' directory in its root path.
 
-The convention is that each 'templates' directory contains a subdirectory with the same name as the plugin :
-  * e.g. templates/myplugin/my_template.html
+The convention is that each 'templates' directory contains a subdirectory with the same name as the plugin (e.g. `templates/myplugin/my_template.html`)
 
 
-In this case, the template can then be loaded (from any plugin!) by loading "myplugin/my_template.html".
-
+In this case, the template can then be loaded (from any plugin!) by loading `myplugin/my_template.html`.
 
 
 ### Javascript
 
 Custom code can be provided which will run when the particular panel is first loaded (by selecting it from the side menu).
 
-To add some javascript code, you can add a reference to a function that will be called when the panel is loaded with the 'javascript' key in the panel description :
-```
-  {
-        'title': "Updates",
-        'description': "Latest updates for this part",
-        'javascript': 'alert("You just loaded this panel!")',
-    }
+To add some javascript code, you can add a reference to a function that will be called when the panel is loaded with the 'javascript' key in the panel description:
+
+```python
+{
+    'title': "Updates",
+    'description': "Latest updates for this part",
+    'javascript': 'alert("You just loaded this panel!")',
+}
 ```
 
-Or to add a template file that will be rendered as javascript code, from the plugin template folder, with the 'javascript_template' key in the panel description :
- ```
-  {
-        'title': "Updates",
-        'description': "Latest updates for this part",
-        'javascript_template': 'pluginTemplatePath/myJavascriptFile.js',
-    }
+Or to add a template file that will be rendered as javascript code, from the plugin template folder, with the 'javascript_template' key in the panel description:
+
+```python
+{
+    'title': "Updates",
+    'description': "Latest updates for this part",
+    'javascript_template': 'pluginTemplatePath/myJavascriptFile.js',
+}
 ```
-note : see convention for template directory above.
+
+Note : see convention for template directory above.
 
 ## Example Implementation
 
 Refer to the `CustomPanelSample` example class in the `./plugin/samples/integration/` directory, for a fully worked example of how custom UI panels can be implemented.
 
-### An example with button
+### An example with button and parameter
 
 Let's have a look at another example. We like to have a new panel that contains a button.
 Each time the button is clicked, a python function in our plugin shall be executed and
-do something useful. The result will look like that:
+a parameter shall be transferred . The result will look like that:
 
 {% with id="mouser", url="plugin/mouser.png", description="Panel example with button" %} {% include "img.html" %} {% endwith %}
+
 
 First we need to write the plugin code, similar as in the example above.
 
@@ -98,32 +100,31 @@ class MouserCartPanel(PanelMixin, SettingsMixin, InvenTreePlugin, UrlsMixin):
 
     def setup_urls(self):
         return [
-            url(r'mouser/getcart', self.GetCart, name='get-cart'),
+            url(r'transfercart/(?P<pk>\d+)/', self.TransferCart, name='get-cart')
         ]
 
 #----------------------------------------------------------------------------
-    def GetCart(self,request):
+    def TransferCart(self,request,pk):
 
-        print('User:',request.user)
+        print('User,pk:',request.user,pk)
         self.value=self.value+1
         return HttpResponse(f'OK')
-
-
 ```
 
 The code is simple and really stripped down to the minimum. In the plugin class we first define the plugin metadata.
 Afterwards we define the custom panel. Here we use a html template to describe the content of the panel. We need to
 add the path here because the template resides in the subdirectory templates/mouser.
 Then we setup the url. This is important. The url connects the http request with the function to be executed.
+May be it is worth to leave a few more words on this because the string looks a bit like white noise.
+*transfercart* is the url which can be chosen freely. The ? is well known for parameters. In this case we
+get just one parameter, the orders primary key.* \d+* is a regular expression that limits the parameters
+to a digital number with n digits. Let's have a look on the names and how they belong together:
 
- * mouser/getcart: Path of the url together with SLUG
- * self.GetCart: This is the function to be called. It is defined further down
- * get-cart: This is the name of the url that needs to be referenced in the html template. We see that later.
+{% with id="plugin_dataflow", url="plugin/plugin_dataflow.png", description="Dataflow between Javescript and Python" %} {% include "img.html" %} {% endwith %}
 
 Finally we define the function. This is a simple increment of a class value.
 
-
-New lets have a look at the template file mouser.html
+Now lets have a look at the template file mouser.html
 
 ```html
 {% raw %}
@@ -131,7 +132,7 @@ New lets have a look at the template file mouser.html
 
 <script>
 async function JGetCart(){
-    response = await fetch( '{% url "plugin:mousercart:get-cart" %}');
+    response = await fetch( '{% url "plugin:mousercart:get-cart" order.pk %}');
     location.reload();
 }
 </script>
@@ -148,7 +149,7 @@ async function JGetCart(){
 
 We start with a bit of javascript. The function JGetCart just calls the url that has been defined in the python code above.
 The url consists of a full path `plugin:plugin-name:url-name`. The plugin-name is the SLUG that was defined in the plugin code.
-Then just a reload.
+order.pk is the parameter that is passed to python. 
 
 The button is defined  with `class="btn btn-info` This is an InvenTree predefined button. There a are lots of others available.
 Here are some examples of available colors:
