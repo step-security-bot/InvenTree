@@ -128,6 +128,10 @@ function partFields(options={}) {
             filters: {
                 structural: false,
             },
+            tree_picker: {
+                url: '{% url "api-part-category-tree" %}',
+                default_icon: global_settings.PART_CATEGORY_DEFAULT_ICON,
+            },
         },
         name: {},
         IPN: {},
@@ -147,7 +151,11 @@ function partFields(options={}) {
             icon: 'fa-sitemap',
             filters: {
                 structural: false,
-            }
+            },
+            tree_picker: {
+                url: '{% url "api-location-tree" %}',
+                default_icon: global_settings.STOCK_LOCATION_DEFAULT_ICON,
+            },
         },
         default_supplier: {
             icon: 'fa-building',
@@ -164,6 +172,9 @@ function partFields(options={}) {
         },
         responsible: {
             icon: 'fa-user',
+            filters: {
+                is_active: true,
+            }
         },
         component: {
             default: global_settings.PART_COMPONENT,
@@ -275,6 +286,10 @@ function partFields(options={}) {
             value: global_settings.PART_COPY_BOM,
         };
 
+        fields.duplicate__copy_notes = {
+            value: true,
+        }
+
         fields.duplicate__copy_parameters = {
             value: global_settings.PART_COPY_PARAMETERS,
         };
@@ -292,6 +307,10 @@ function categoryFields(options={}) {
         parent: {
             help_text: '{% trans "Parent part category" %}',
             required: false,
+            tree_picker: {
+                url: '{% url "api-part-category-tree" %}',
+                default_icon: global_settings.PART_CATEGORY_DEFAULT_ICON,
+            },
         },
         name: {},
         description: {},
@@ -299,7 +318,11 @@ function categoryFields(options={}) {
             icon: 'fa-sitemap',
             filters: {
                 structural: false,
-            }
+            },
+            tree_picker: {
+                url: '{% url "api-location-tree" %}',
+                default_icon: global_settings.STOCK_LOCATION_DEFAULT_ICON,
+            },
         },
         default_keywords: {
             icon: 'fa-key',
@@ -848,6 +871,10 @@ function generateStocktakeReport(options={}) {
     if (options.location != null) {
         fields.location = options.location;
     }
+
+    fields.exclude_external = {
+        value: global_settings.STOCKTAKE_EXCLUDE_EXTERNAL,
+    };
 
     if (options.generate_report) {
         fields.generate_report = options.generate_report;
@@ -1404,6 +1431,7 @@ function createPartParameter(part_id, options={}) {
 function editPartParameter(param_id, options={}) {
     options.fields = partParameterFields();
     options.title = '{% trans "Edit Parameter" %}';
+    options.focus = 'data';
 
     options.processBeforeUpload = function(data) {
         // Convert data to string
@@ -2176,7 +2204,12 @@ function setPartCategory(data, options={}) {
         method: 'POST',
         preFormContent: html,
         fields: {
-            category: {},
+            category: {
+                tree_picker: {
+                    url: '{% url "api-part-category-tree" %}',
+                    default_icon: global_settings.PART_CATEGORY_DEFAULT_ICON,
+                },
+            },
         },
         processBeforeUpload: function(data) {
             data.parts = parts;
@@ -2367,6 +2400,38 @@ function loadPartTable(table, url, options={}) {
             });
 
             return text;
+        },
+        footerFormatter: function(data) {
+            // Display "total" stock quantity of all rendered rows
+            // Requires that all parts have the same base units!
+
+            let total = 0;
+            let units = new Set();
+
+            data.forEach(function(row) {
+                units.add(row.units || null);
+                if (row.total_in_stock != null) {
+                    total += row.total_in_stock;
+                }
+            });
+
+            if (data.length == 0) {
+                return '-';
+            } else if (units.size > 1) {
+                return '-';
+            } else {
+                let output = `${total}`;
+
+                if (units.size == 1) {
+                    let unit = units.values().next().value;
+
+                    if (unit) {
+                        output += ` [${unit}]`;
+                    }
+                }
+
+                return output;
+            }
         }
     });
 
@@ -2442,6 +2507,7 @@ function loadPartTable(table, url, options={}) {
         showColumns: true,
         showCustomView: grid_view,
         showCustomViewButton: false,
+        showFooter: true,
         onPostBody: function() {
             grid_view = inventreeLoad('part-grid-view') == 1;
             if (grid_view) {
