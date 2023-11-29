@@ -21,6 +21,15 @@
       "args": ["runserver"],
       "django": true,
       "justMyCode": false
+    },
+    {
+      "name": "Python: Django - test",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/InvenTree/manage.py",
+      "args": ["test", "plugin.base.label.test_label_mixin.LabelMixinTests.test_printing_process"],
+      "django": true,
+      "justMyCode": false
     }
   ]
 }
