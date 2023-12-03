@@ -543,7 +543,7 @@ class PurchaseOrder(TotalPriceMixin, Order):
     @transaction.atomic
     def cancel_order(self):
         """Marks the PurchaseOrder as CANCELLED."""
-        if self.can_cancel():
+        if self.can_cancel:
             self.status = PurchaseOrderStatus.CANCELLED.value
             self.save()
 
@@ -931,7 +931,7 @@ class SalesOrder(TotalPriceMixin, Order):
         - Mark the order as 'cancelled'
         - Delete any StockItems which have been allocated
         """
-        if not self.can_cancel():
+        if not self.can_cancel:
             return False
 
         self.status = SalesOrderStatus.CANCELLED.value
