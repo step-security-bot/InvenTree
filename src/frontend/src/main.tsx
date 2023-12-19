@@ -3,8 +3,8 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
+import MainView from './views/MainView';
 
-import App from './App';
 import { HostList } from './states/states';
 
 // define settings
@@ -71,7 +71,7 @@ export const base_url = window.INVENTREE_SETTINGS.base_url || 'platform';
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
-    <App />
+    <MainView />
   </React.StrictMode>
 );
 
