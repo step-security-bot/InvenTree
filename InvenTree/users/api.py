@@ -229,7 +229,7 @@ class GetAuthToken(APIView):
                 token = ApiToken.objects.create(user=request.user, name=name)
 
             # Add some metadata about the request
-            token.set_metadata('user_agent', request.META.get('HTTP_USER_AGENT', ''))
+            token.set_metadata('user_agent', request.headers.get('user-agent', ''))
             token.set_metadata('remote_addr', request.META.get('REMOTE_ADDR', ''))
             token.set_metadata('remote_host', request.META.get('REMOTE_HOST', ''))
             token.set_metadata('remote_user', request.META.get('REMOTE_USER', ''))
