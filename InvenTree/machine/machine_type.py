@@ -2,6 +2,8 @@
 
 from typing import TYPE_CHECKING, Any, Dict, List, Literal, Tuple, Type, Union
 
+from django.core.exceptions import ObjectDoesNotExist
+
 from generic.states import StatusCode
 from InvenTree.helpers_mixin import ClassProviderMixin, ClassValidationMixin
 
@@ -245,7 +247,10 @@ class BaseMachineType(ClassValidationMixin, ClassProviderMixin):
     @property
     def active(self):
         """The machines active status."""
-        return self.machine_config.active
+        try:
+            return self.machine_config.active
+        except ObjectDoesNotExist:
+            return False
 
     # --- hook functions
     def initialize(self):
