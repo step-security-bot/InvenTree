@@ -28,7 +28,7 @@ jobs:
         with:
           apt-dependency: gettext poppler-utils
           dev-install: true
-          install: true
+          update: true
       - name: Run benchmarks
         uses: CodSpeedHQ/action@v2
         with:
