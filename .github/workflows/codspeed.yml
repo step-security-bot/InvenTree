@@ -29,9 +29,9 @@ jobs:
           apt-dependency: gettext poppler-utils
           dev-install: true
           install: true
+      - run: invoke update
+      - run: pip uninstall coverage
       - name: Run benchmarks
         uses: CodSpeedHQ/action@v2
         with:
-          run: |
-            invoke migrate
-            pytest InvenTree/ --codspeed
+          run: python3 -m pytest InvenTree/ --codspeed
