@@ -14,6 +14,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       INVENTREE_DB_NAME: ./inventree.sqlite
+      INVENTREE_STATIC_ROOT: ./static
+      INVENTREE_MEDIA_ROOT: ./media
+      INVENTREE_BACKUP_DIR: ./backups
       INVENTREE_DB_ENGINE: sqlite3
       INVENTREE_DEBUG: info
       INVENTREE_PLUGINS_ENABLED: false
