@@ -33,5 +33,5 @@ jobs:
         uses: CodSpeedHQ/action@v2
         with:
           run: |
-            invoke update
+            invoke migrate
             pytest InvenTree/ --codspeed
