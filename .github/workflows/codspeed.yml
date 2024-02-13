@@ -28,8 +28,10 @@ jobs:
         with:
           apt-dependency: gettext poppler-utils
           dev-install: true
-          update: true
+          install: true
       - name: Run benchmarks
         uses: CodSpeedHQ/action@v2
         with:
-          run: pytest InvenTree/ --codspeed
+          run: |
+            invoke update
+            pytest InvenTree/ --codspeed
