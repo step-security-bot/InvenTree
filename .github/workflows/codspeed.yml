@@ -1,0 +1,32 @@
+name: codspeed-benchmarks
+
+on:
+  push:
+    branches:
+      - "master"
+      - "codspeed/*"
+      - "codspeed"
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  benchmarks:
+    runs-on: ubuntu-latest
+    env:
+      INVENTREE_DB_NAME: ./inventree.sqlite
+      INVENTREE_DB_ENGINE: sqlite3
+      INVENTREE_PLUGINS_ENABLED: true
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Environment Setup
+        uses: ./.github/actions/setup
+        with:
+          apt-dependency: gettext poppler-utils
+          dev-install: true
+          update: true
+      - name: Run benchmarks
+        uses: CodSpeedHQ/action@v2
+        with:
+          token: ${{ secrets.CODSPEED_TOKEN }}
+          run: pytest InvenTree/ --codspeed

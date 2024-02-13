@@ -15,7 +15,7 @@ exclude = [
 src = ["InvenTree"]
 # line-length = 120
 
-[tool.ruff.extend-per-file-ignores]
+[tool.ruff.lint.extend-per-file-ignores]
 "__init__.py" = ["D104"]
 
 [tool.ruff.lint]
@@ -79,3 +79,6 @@ src_paths=["InvenTree", "../InvenTree"]
 skip_glob ="*/migrations/*.py"
 known_django="django"
 sections=["FUTURE","STDLIB","DJANGO","THIRDPARTY","FIRSTPARTY","LOCALFOLDER"]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "InvenTree.test_settings"

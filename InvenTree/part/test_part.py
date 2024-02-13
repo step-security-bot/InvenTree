@@ -7,6 +7,7 @@ from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 
+import pytest
 from allauth.account.models import EmailAddress
 
 import part.settings
@@ -165,6 +166,7 @@ class PartTest(TestCase):
         barcode = p.format_barcode(brief=True)
         self.assertEqual(barcode, '{"part": 1}')
 
+    @pytest.mark.benchmark
     def test_tree(self):
         """Test that the part variant tree is working properly."""
         chair = Part.objects.get(pk=10000)
@@ -177,11 +179,13 @@ class PartTest(TestCase):
         self.assertEqual(green.get_family().count(), 3)
         self.assertEqual(Part.objects.filter(tree_id=chair.tree_id).count(), 5)
 
+    @pytest.mark.benchmark
     def test_str(self):
         """Test string representation of a Part."""
         p = Part.objects.get(pk=100)
         self.assertEqual(str(p), 'BOB | Bob | A2 - Can we build it? Yes we can!')
 
+    @pytest.mark.benchmark
     def test_duplicate(self):
         """Test that we cannot create a "duplicate" Part."""
         n = Part.objects.count()
@@ -234,11 +238,13 @@ class PartTest(TestCase):
         with self.assertRaises(ValidationError):
             part_2.validate_unique()
 
+    @pytest.mark.benchmark
     def test_attributes(self):
         """Test Part attributes."""
         self.assertEqual(self.r1.name, 'R_2K2_0805')
         self.assertEqual(self.r1.get_absolute_url(), '/part/3/')
 
+    @pytest.mark.benchmark
     def test_category(self):
         """Test PartCategory path."""
         self.c1.category.save()
@@ -248,11 +254,13 @@ class PartTest(TestCase):
         self.assertIsNone(orphan.category)
         self.assertEqual(orphan.category_path, '')
 
+    @pytest.mark.benchmark
     def test_rename_img(self):
         """Test that an image can be renamed."""
         img = rename_part_image(self.r1, 'hello.png')
         self.assertEqual(img, os.path.join('part_images', 'hello.png'))
 
+    @pytest.mark.benchmark
     def test_stock(self):
         """Test case where there is zero stock."""
         res = Part.objects.filter(description__contains='resistor')
@@ -260,12 +268,14 @@ class PartTest(TestCase):
             self.assertEqual(r.total_stock, 0)
             self.assertEqual(r.available_stock, 0)
 
+    @pytest.mark.benchmark
     def test_barcode(self):
         """Test barcode format functionality."""
         barcode = self.r1.format_barcode(brief=False)
         self.assertIn('InvenTree', barcode)
         self.assertIn('"part": {"id": 3}', barcode)
 
+    @pytest.mark.benchmark
     def test_sell_pricing(self):
         """Check that the sell pricebreaks were loaded."""
         self.assertTrue(self.r1.has_price_breaks)
@@ -274,6 +284,7 @@ class PartTest(TestCase):
         self.assertEqual(float(self.r1.get_price(1)), 0.15)
         self.assertEqual(float(self.r1.get_price(10)), 1.0)
 
+    @pytest.mark.benchmark
     def test_internal_pricing(self):
         """Check that the sell pricebreaks were loaded."""
         self.assertTrue(self.r1.has_internal_price_breaks)
@@ -282,6 +293,7 @@ class PartTest(TestCase):
         self.assertEqual(float(self.r1.get_internal_price(1)), 0.08)
         self.assertEqual(float(self.r1.get_internal_price(10)), 0.5)
 
+    @pytest.mark.benchmark
     def test_metadata(self):
         """Unit tests for the metadata field."""
         for model in [Part]:
@@ -299,6 +311,7 @@ class PartTest(TestCase):
 
             self.assertEqual(len(p.metadata.keys()), 4)
 
+    @pytest.mark.benchmark
     def test_related(self):
         """Unit tests for the PartRelated model."""
         # Create a part relationship
@@ -347,6 +360,7 @@ class PartTest(TestCase):
         self.r2.delete()
         self.assertEqual(PartRelated.objects.count(), countbefore)
 
+    @pytest.mark.benchmark
     def test_stocktake(self):
         """Test for adding stocktake data."""
         # Grab a part
@@ -365,6 +379,7 @@ class TestTemplateTest(TestCase):
 
     fixtures = ['category', 'part', 'location', 'test_templates']
 
+    @pytest.mark.benchmark
     def test_template_count(self):
         """Tests for the test template functions."""
         chair = Part.objects.get(pk=10000)
@@ -382,6 +397,7 @@ class TestTemplateTest(TestCase):
         self.assertEqual(variant.getTestTemplates(include_parent=False).count(), 1)
         self.assertEqual(variant.getTestTemplates(required=True).count(), 5)
 
+    @pytest.mark.benchmark
     def test_uniqueness(self):
         """Test names must be unique for this part and also parts above."""
         variant = Part.objects.get(pk=10004)
@@ -424,6 +440,7 @@ class PartSettingsTest(InvenTreeTestCase):
 
         return part
 
+    @pytest.mark.benchmark
     def test_defaults(self):
         """Test that the default values for the part settings are correct."""
         cache.clear()
