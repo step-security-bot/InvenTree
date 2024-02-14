@@ -30,7 +30,7 @@ jobs:
           dev-install: true
           install: true
       - run: invoke update
-      - run: pip uninstall coverage
+      - run: pip uninstall coverage -y
       - name: Run benchmarks
         uses: CodSpeedHQ/action@v2
         with:
