@@ -129,7 +129,7 @@ class NotificationUserSettingTests(BaseNotificationIntegrationTest):
         self.client.login(username=self.user.username, password='password')
 
     def test_setting_attributes(self):
-        """Check notification method plugin methods: usersettings and tags."""
+        """Check notification method plugin methods: usersettings."""
 
         class SampleImplementation(BulkNotificationMethod):
             METHOD_NAME = 'test'
@@ -150,8 +150,6 @@ class NotificationUserSettingTests(BaseNotificationIntegrationTest):
 
         # run through notification
         self._notification_run(SampleImplementation)
-        # make sure the array fits
-        array = storage.get_usersettings(self.user)
         setting = NotificationUserSetting.objects.all().first()
 
         # assertions for settings
@@ -161,10 +159,3 @@ class NotificationUserSettingTests(BaseNotificationIntegrationTest):
             setting.description, 'Allow sending of test for event notifications'
         )
         self.assertEqual(setting.units, 'alpha')
-
-        # test tag and array
-        self.assertEqual(
-            plugin_tags.notification_settings_list({'user': self.user}), array
-        )
-        self.assertEqual(array[0]['key'], 'NOTIFICATION_METHOD_TEST')
-        self.assertEqual(array[0]['method'], 'test')

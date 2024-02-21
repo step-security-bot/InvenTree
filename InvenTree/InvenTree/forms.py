@@ -5,7 +5,7 @@ from urllib.parse import urlencode
 
 from django import forms
 from django.conf import settings
-from django.contrib.auth.models import Group, User
+from django.contrib.auth.models import Group
 from django.http import HttpResponseRedirect
 from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
@@ -16,14 +16,11 @@ from allauth.core.exceptions import ImmediateHttpResponse
 from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
 from allauth_2fa.adapter import OTPAdapter
 from allauth_2fa.utils import user_has_valid_totp_device
-from crispy_forms.bootstrap import AppendedText, PrependedAppendedText, PrependedText
-from crispy_forms.helper import FormHelper
-from crispy_forms.layout import Field, Layout
 from dj_rest_auth.registration.serializers import RegisterSerializer
 from rest_framework import serializers
 
 import InvenTree.helpers_model
-import InvenTree.sso
+import InvenTree.social_auth_urls
 from common.models import InvenTreeSetting
 from InvenTree.exceptions import log_error
 
@@ -96,7 +93,7 @@ def registration_enabled():
     """Determine whether user registration is enabled."""
     if (
         InvenTreeSetting.get_setting('LOGIN_ENABLE_REG')
-        or InvenTree.sso.registration_enabled()
+        or InvenTree.social_auth_urls.registration_enabled()
     ):
         if settings.EMAIL_HOST:
             return True
