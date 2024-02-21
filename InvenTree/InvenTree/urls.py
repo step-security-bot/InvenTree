@@ -437,21 +437,14 @@ if settings.INVENTREE_ADMIN_ENABLED:
 
 urlpatterns += backendpatterns
 
-frontendpatterns = []
-
-if settings.ENABLE_CLASSIC_FRONTEND:
-    frontendpatterns += classic_frontendpatterns
-if settings.ENABLE_PLATFORM_FRONTEND:
-    frontendpatterns += platform_urls
-    if not settings.ENABLE_CLASSIC_FRONTEND:
-        # Add a redirect for login views
-        frontendpatterns += [
-            path(
-                'accounts/login/',
-                RedirectView.as_view(url=settings.FRONTEND_URL_BASE, permanent=False),
-                name='account_login',
-            )
-        ]
+frontendpatterns = platform_urls
+frontendpatterns += [
+    path(
+        'accounts/login/',
+        RedirectView.as_view(url=settings.FRONTEND_URL_BASE, permanent=False),
+        name='account_login',
+    )
+]
 
 urlpatterns += frontendpatterns
 
@@ -479,12 +472,7 @@ urlpatterns.append(
 urlpatterns += [
     re_path(
         r'^.*$',
-        RedirectView.as_view(
-            url='/index/'
-            if settings.ENABLE_CLASSIC_FRONTEND
-            else settings.FRONTEND_URL_BASE,
-            permanent=False,
-        ),
+        RedirectView.as_view(url=settings.FRONTEND_URL_BASE, permanent=False),
         name='index',
     )
 ]
