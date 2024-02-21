@@ -4,11 +4,13 @@ import logging
 from datetime import date, datetime
 
 from django import template
+from django.conf import settings as djangosettings
 
 import common.models
 import InvenTree.helpers
 import InvenTree.helpers_model
 from InvenTree import version
+from plugin import registry
 
 register = template.Library()
 
@@ -118,6 +120,22 @@ def inventree_show_about(user, *args, **kwargs):
             return False
 
     return True
+
+
+@register.simple_tag()
+def plugins_info(*args, **kwargs):
+    """Return information about activated plugins."""
+    # Check if plugins are even enabled
+    if not djangosettings.PLUGINS_ENABLED:
+        return False
+
+    # Fetch plugins
+    plug_list = [plg for plg in registry.plugins.values() if plg.plugin_config().active]
+    # Format list
+    return [
+        {'name': plg.name, 'slug': plg.slug, 'version': plg.version}
+        for plg in plug_list
+    ]
 
 
 @register.simple_tag()

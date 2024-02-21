@@ -19,7 +19,6 @@ import django.conf.locale
 import django.core.exceptions
 from django.core.validators import URLValidator
 from django.http import Http404
-from django.utils.translation import gettext_lazy as _
 
 import moneyed
 from dotenv import load_dotenv
@@ -137,9 +136,6 @@ if DEBUG and 'collectstatic' not in sys.argv:
         STATICFILES_DIRS.append(web_dir)
 
 STATFILES_I18_PROCESSORS = ['InvenTree.context.status_codes']
-
-# Color Themes Directory
-STATIC_COLOR_THEMES_DIR = STATIC_ROOT.joinpath('css', 'color-themes').resolve()
 
 # Web URL endpoint for served media files
 MEDIA_URL = '/media/'
