@@ -59,14 +59,17 @@ The InvenTree documentation assumes that the operating system is a debian based 
 InvenTree runs on [Python](https://python.org).
 
 !!! warning "Python Version"
-    InvenTree requrires Python 3.9 (or newer). If your system has an older version of Python installed, you will need to follow the update instructions for your OS.
+    InvenTree requires Python 3.9 (or newer). If your system has an older version of Python installed, you will need to follow the update instructions for your OS.
 
 ### Invoke
 
 InvenTree makes use of the [invoke](https://www.pyinvoke.org/) python toolkit for performing various administrative actions.
 
 !!! warning "Invoke Version"
-	InvenTree requires invoke version 1.4.0 or newer. Some platforms may be shipped with older versions of invoke!
+	InvenTree requires invoke version 2.0.0 or newer. Some platforms may be shipped with older versions of invoke!
+
+!!! tip "Updating Invoke"
+    To update your invoke version, run `pip install -U invoke`
 
 To display a list of the available InvenTree administration actions, run the following commands from the top level source directory:
 

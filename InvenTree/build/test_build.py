@@ -1,5 +1,5 @@
 """Unit tests for the 'build' models"""
-
+import uuid
 from datetime import datetime, timedelta
 
 from django.test import TestCase
@@ -14,8 +14,8 @@ from InvenTree import status_codes as status
 import common.models
 import build.tasks
 from build.models import Build, BuildItem, BuildLine, generate_next_build_reference
-from part.models import Part, BomItem, BomItemSubstitute
-from stock.models import StockItem
+from part.models import Part, BomItem, BomItemSubstitute, PartTestTemplate
+from stock.models import StockItem, StockItemTestResult
 from users.models import Owner
 
 import logging
@@ -45,7 +45,6 @@ class BuildTestBase(TestCase):
         - 7 x output_2
 
         """
-
         super().setUpTestData()
 
         # Create a base "Part"
@@ -54,6 +53,76 @@ class BuildTestBase(TestCase):
             description="Why does it matter what my description is?",
             assembly=True,
             trackable=True,
+        )
+
+        # create one build with one required test template
+        cls.tested_part_with_required_test = Part.objects.create(
+            name="Part having required tests",
+            description="Why does it matter what my description is?",
+            assembly=True,
+            trackable=True,
+        )
+
+        cls.test_template_required = PartTestTemplate.objects.create(
+            part=cls.tested_part_with_required_test,
+            test_name="Required test",
+            description="Required test template description",
+            required=True,
+            requires_value=False,
+            requires_attachment=False
+        )
+
+        ref = generate_next_build_reference()
+
+        cls.build_w_tests_trackable = Build.objects.create(
+            reference=ref,
+            title="This is a build",
+            part=cls.tested_part_with_required_test,
+            quantity=1,
+            issued_by=get_user_model().objects.get(pk=1),
+        )
+
+        cls.stockitem_with_required_test = StockItem.objects.create(
+            part=cls.tested_part_with_required_test,
+            quantity=1,
+            is_building=True,
+            serial=uuid.uuid4(),
+            build=cls.build_w_tests_trackable
+        )
+
+        # now create a part with a non-required test template
+        cls.tested_part_wo_required_test = Part.objects.create(
+            name="Part with one non.required test",
+            description="Why does it matter what my description is?",
+            assembly=True,
+            trackable=True,
+        )
+
+        cls.test_template_non_required = PartTestTemplate.objects.create(
+            part=cls.tested_part_wo_required_test,
+            test_name="Required test template",
+            description="Required test template description",
+            required=False,
+            requires_value=False,
+            requires_attachment=False
+        )
+
+        ref = generate_next_build_reference()
+
+        cls.build_wo_tests_trackable = Build.objects.create(
+            reference=ref,
+            title="This is a build",
+            part=cls.tested_part_wo_required_test,
+            quantity=1,
+            issued_by=get_user_model().objects.get(pk=1),
+        )
+
+        cls.stockitem_wo_required_test = StockItem.objects.create(
+            part=cls.tested_part_wo_required_test,
+            quantity=1,
+            is_building=True,
+            serial=uuid.uuid4(),
+            build=cls.build_wo_tests_trackable
         )
 
         cls.sub_part_1 = Part.objects.create(
@@ -145,7 +214,7 @@ class BuildTest(BuildTestBase):
 
     def test_ref_int(self):
         """Test the "integer reference" field used for natural sorting"""
-
+        # Set build reference to new value
         common.models.InvenTreeSetting.set_setting('BUILDORDER_REFERENCE_PATTERN', 'BO-{ref}-???', change_user=None)
 
         refs = {
@@ -168,11 +237,12 @@ class BuildTest(BuildTestBase):
             build.save()
             self.assertEqual(build.reference_int, ref_int)
 
+        # Set build reference back to default value
+        common.models.InvenTreeSetting.set_setting('BUILDORDER_REFERENCE_PATTERN', 'BO-{ref:04d}', change_user=None)
+
     def test_ref_validation(self):
         """Test that the reference field validation works as expected"""
-
         # Default reference pattern = 'BO-{ref:04d}
-
         # These patterns should fail
         for ref in [
             'BO-1234x',
@@ -214,9 +284,11 @@ class BuildTest(BuildTestBase):
                 title='Valid reference',
             )
 
+        # Set build reference back to default value
+        common.models.InvenTreeSetting.set_setting('BUILDORDER_REFERENCE_PATTERN', 'BO-{ref:04d}', change_user=None)
+
     def test_next_ref(self):
         """Test that the next reference is automatically generated"""
-
         common.models.InvenTreeSetting.set_setting('BUILDORDER_REFERENCE_PATTERN', 'XYZ-{ref:06d}', change_user=None)
 
         build = Build.objects.create(
@@ -238,10 +310,12 @@ class BuildTest(BuildTestBase):
         self.assertEqual(build.reference, 'XYZ-000988')
         self.assertEqual(build.reference_int, 988)
 
+        # Set build reference back to default value
+        common.models.InvenTreeSetting.set_setting('BUILDORDER_REFERENCE_PATTERN', 'BO-{ref:04d}', change_user=None)
+
     def test_init(self):
         """Perform some basic tests before we start the ball rolling"""
-
-        self.assertEqual(StockItem.objects.count(), 10)
+        self.assertEqual(StockItem.objects.count(), 12)
 
         # Build is PENDING
         self.assertEqual(self.build.status, status.BuildStatus.PENDING)
@@ -262,7 +336,6 @@ class BuildTest(BuildTestBase):
 
     def test_build_item_clean(self):
         """Ensure that dodgy BuildItem objects cannot be created"""
-
         stock = StockItem.objects.create(part=self.assembly, quantity=99)
 
         # Create a BuiltItem which points to an invalid StockItem
@@ -289,7 +362,6 @@ class BuildTest(BuildTestBase):
 
     def test_duplicate_bom_line(self):
         """Try to add a duplicate BOM item - it should be allowed"""
-
         BomItem.objects.create(
             part=self.assembly,
             sub_part=self.sub_part_1,
@@ -303,7 +375,6 @@ class BuildTest(BuildTestBase):
             output: StockItem object (or None)
             allocations: Map of {StockItem: quantity}
         """
-
         items_to_create = []
 
         for item, quantity in allocations.items():
@@ -325,7 +396,6 @@ class BuildTest(BuildTestBase):
 
     def test_partial_allocation(self):
         """Test partial allocation of stock"""
-
         # Fully allocate tracked stock against build output 1
         self.allocate_stock(
             self.output_1,
@@ -399,7 +469,6 @@ class BuildTest(BuildTestBase):
 
     def test_overallocation_and_trim(self):
         """Test overallocation of stock and trim function"""
-
         # Fully allocate tracked stock (not eligible for trimming)
         self.allocate_stock(
             self.output_1,
@@ -472,11 +541,31 @@ class BuildTest(BuildTestBase):
         # Check that the "consumed_by" item count has increased
         self.assertEqual(StockItem.objects.filter(consumed_by=self.build).count(), n + 8)
 
+    def test_change_part(self):
+        """Try to change target part after creating a build"""
+
+        bo = Build.objects.create(
+            reference='BO-9999',
+            title='Some new build',
+            part=self.assembly,
+            quantity=5,
+            issued_by=get_user_model().objects.get(pk=1),
+        )
+
+        assembly_2 = Part.objects.create(
+            name="Another assembly",
+            description="A different assembly",
+            assembly=True,
+        )
+
+        # Should not be able to change the part after the Build is saved
+        with self.assertRaises(ValidationError):
+            bo.part = assembly_2
+            bo.clean()
+
     def test_cancel(self):
         """Test cancellation of the build"""
-
         # TODO
-
         """
         self.allocate_stock(50, 50, 200, self.output_1)
         self.build.cancel_build(None)
@@ -487,7 +576,6 @@ class BuildTest(BuildTestBase):
 
     def test_complete(self):
         """Test completion of a build output"""
-
         self.stock_1_1.quantity = 1000
         self.stock_1_1.save()
 
@@ -540,7 +628,7 @@ class BuildTest(BuildTestBase):
         self.assertEqual(BuildItem.objects.count(), 0)
 
         # New stock items should have been created!
-        self.assertEqual(StockItem.objects.count(), 13)
+        self.assertEqual(StockItem.objects.count(), 15)
 
         # This stock item has been marked as "consumed"
         item = StockItem.objects.get(pk=self.stock_1_1.pk)
@@ -555,9 +643,29 @@ class BuildTest(BuildTestBase):
         for output in outputs:
             self.assertFalse(output.is_building)
 
+    def test_complete_with_required_tests(self):
+        """Test the prevention completion when a required test is missing feature"""
+
+        # with required tests incompleted the save should fail
+        common.models.InvenTreeSetting.set_setting('PREVENT_BUILD_COMPLETION_HAVING_INCOMPLETED_TESTS', True, change_user=None)
+
+        with self.assertRaises(ValidationError):
+            self.build_w_tests_trackable.complete_build_output(self.stockitem_with_required_test, None)
+
+        # let's complete the required test and see if it could be saved
+        StockItemTestResult.objects.create(
+            stock_item=self.stockitem_with_required_test,
+            template=self.test_template_required,
+            result=True
+        )
+
+        self.build_w_tests_trackable.complete_build_output(self.stockitem_with_required_test, None)
+
+        # let's see if a non required test could be saved
+        self.build_wo_tests_trackable.complete_build_output(self.stockitem_wo_required_test, None)
+
     def test_overdue_notification(self):
         """Test sending of notifications when a build order is overdue."""
-
         self.build.target_date = datetime.now().date() - timedelta(days=1)
         self.build.save()
 
@@ -573,7 +681,6 @@ class BuildTest(BuildTestBase):
 
     def test_new_build_notification(self):
         """Test that a notification is sent when a new build is created"""
-
         Build.objects.create(
             reference='BO-9999',
             title='Some new build',
@@ -599,7 +706,6 @@ class BuildTest(BuildTestBase):
 
     def test_metadata(self):
         """Unit tests for the metadata field."""
-
         # Make sure a BuildItem exists before trying to run this test
         b = BuildItem(stock_item=self.stock_1_2, build_line=self.line_1, install_into=self.output_1, quantity=10)
         b.save()
@@ -654,7 +760,6 @@ class AutoAllocationTests(BuildTestBase):
 
         A "fully auto" allocation should allocate *all* of these stock items to the build
         """
-
         # No build item allocations have been made against the build
         self.assertEqual(self.build.allocated_stock.count(), 0)
 
@@ -707,7 +812,6 @@ class AutoAllocationTests(BuildTestBase):
 
     def test_fully_auto(self):
         """We should be able to auto-allocate against a build in a single go"""
-
         self.build.auto_allocate_stock(
             interchangeable=True,
             substitutes=True,

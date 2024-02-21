@@ -53,10 +53,25 @@ The following basic options are available:
 | --- | --- | --- | --- |
 | INVENTREE_DEBUG | debug | Enable [debug mode](./intro.md#debug-mode) | True |
 | INVENTREE_LOG_LEVEL | log_level | Set level of logging to terminal | WARNING |
+| INVENTREE_DB_LOGGING | db_logging | Enable logging of database messages | False |
 | INVENTREE_TIMEZONE | timezone | Server timezone | UTC |
-| ADMIN_URL | admin_url | URL for accessing [admin interface](../settings/admin.md) | admin |
+| INVENTREE_SITE_URL | site_url | Specify a fixed site URL | *Not specified* |
+| INVENTREE_ADMIN_ENABLED | admin_enabled | Enable the [django administrator interface](https://docs.djangoproject.com/en/4.2/ref/contrib/admin/) | True |
+| INVENTREE_ADMIN_URL | admin_url | URL for accessing [admin interface](../settings/admin.md) | admin |
 | INVENTREE_LANGUAGE | language | Default language | en-us |
 | INVENTREE_BASE_URL | base_url | Server base URL | *Not specified* |
+| INVENTREE_AUTO_UPDATE | auto_update | Database migrations will be run automatically | False |
+
+### Admin Site
+
+Django provides a powerful [administrator interface](https://docs.djangoproject.com/en/4.2/ref/contrib/admin/) which can be used to manage the InvenTree database. This interface is enabled by default, but can be disabled by setting `INVENTREE_ADMIN_ENABLED` to `False`.
+
+#### Custom Admin URL
+
+By default, the admin interface is available at the `/admin/` URL. This can be changed by setting the `INVENTREE_ADMIN_URL` environment variable.
+
+!!! warning "Security"
+    Changing the admin URL is a simple way to improve security, but it is not a substitute for proper security practices.
 
 ### Base URL Configuration
 
@@ -74,7 +89,10 @@ An administrator account can be specified using the following environment variab
 | --- | --- | --- | --- |
 | INVENTREE_ADMIN_USER | admin_user | Admin account username | *Not specified* |
 | INVENTREE_ADMIN_PASSWORD | admin_password | Admin account password | *Not specified* |
+| INVENTREE_ADMIN_PASSWORD_FILE | admin_password_file | Admin account password file | *Not specified* |
 | INVENTREE_ADMIN_EMAIL | admin_email |Admin account email address | *Not specified* |
+
+You can either specify the password directly using `INVENTREE_ADMIN_PASSWORD`, or you can specify a file containing the password using `INVENTREE_ADMIN_PASSWORD_FILE` (this is useful for nix users).
 
 !!! info "Administrator Account"
     Providing `INVENTREE_ADMIN` credentials will result in the provided account being created with *superuser* permissions when InvenTree is started.
@@ -163,34 +181,46 @@ The following email settings are available:
 The "sender" email address is the address from which InvenTree emails are sent (by default) and must be specified for outgoing emails to function:
 
 !!! info "Fallback"
-     If `INVENTREE_EMAIL_SENDER` is not provided, the system will fall back to `INVENTREE_EMAIL_USERNAME` (if the username is a valid email address)
+    If `INVENTREE_EMAIL_SENDER` is not provided, the system will fall back to `INVENTREE_EMAIL_USERNAME` (if the username is a valid email address)
 
 ## Supported Currencies
 
 The currencies supported by InvenTree must be specified in the [configuration file](#configuration-file).
 
-A list of currency codes (e.g. *AUD*, *CAD*, *JPY*, *USD*) can be specified using the `currencies` variable.
+A list of currency codes (e.g. *AUD*, *CAD*, *JPY*, *USD*) can be specified using the `currencies` variable (or using the `INVENTREE_CURRENCIES` environment variable).
 
-## Allowed Hosts / CORS
+| Environment Variable | Configuration File | Description | Default |
+| --- | --- | --- | --- |
+| INVENTREE_CURRENCIES | currencies | List of supported currencies| `AUD`, `CAD`, `CNY`, `EUR`, `GBP`, `JPY`, `NZD`, `USD` |
 
-By default, all hosts are allowed, and CORS requests are enabled from any origin.
+!!! tip "More Info"
+    Read the [currencies documentation](../settings/currency.md) for more information on currency support in InvenTree
+
+## Server Access
+
+Depending on how your InvenTree installation is configured, you will need to pay careful attention to the following settings. If you are running your server behind a proxy, or want to adjust support for CORS requests, one or more of the following settings may need to be adjusted.
+
+!!! warning "Advanced Users"
+    The following settings require a certain assumed level of knowledge. You should also refer to the [django documentation](https://docs.djangoproject.com/en/4.2/ref/settings/) for more information.
 
 !!! danger "Not Secure"
     Allowing access from any host is not secure, and should be adjusted for your installation.
 
+!!! info "Environment Variables"
+    Note that a provided environment variable will override the value provided in the configuration file.
+
+!!! success "INVENTREE_SITE_URL"
+    If you have specified the `INVENTREE_SITE_URL`, this will automatically be used as a trusted CSRF and CORS host (see below).
+
 | Environment Variable | Configuration File | Description | Default |
 | --- | --- | --- | --- |
 | INVENTREE_ALLOWED_HOSTS | allowed_hosts | List of allowed hosts | `*` |
+| INVENTREE_TRUSTED_ORIGINS | trusted_origins | List of trusted origins. Refer to the [django documentation](https://docs.djangoproject.com/en/4.2/ref/settings/#csrf-trusted-origins) | Uses the *INVENTREE_SITE_URL* parameter, if set. Otherwise, an empty list. |
 | INVENTREE_CORS_ORIGIN_ALLOW_ALL | cors.allow_all | Allow all remote URLS for CORS checks | False |
-| INVENTREE_CORS_ORIGIN_WHITELIST | cors.whitelist | List of whitelisted CORS URLs | *Empty list* |
-
-!!! info "Configuration File"
-    Allowed hosts and CORS options must be changed in the configuration file, and cannot be set via environment variables
-
-For further information, refer to the following documentation:
-
-* [Django ALLOWED_HOSTS](https://docs.djangoproject.com/en/2.2/ref/settings/#allowed-hosts)
-* [Django CORS headers](https://github.com/OttoYiu/django-cors-headers)
+| INVENTREE_CORS_ORIGIN_WHITELIST | cors.whitelist | List of whitelisted CORS URLs. Refer to the [django-cors-headers documentation](https://github.com/adamchainz/django-cors-headers#cors_allowed_origins-sequencestr) | Uses the *INVENTREE_SITE_URL* parameter, if set. Otherwise, an empty list. |
+| INVENTREE_USE_X_FORWARDED_HOST | use_x_forwarded_host | Use forwarded host header | False |
+| INVENTREE_USE_X_FORWARDED_PORT | use_x_forwarded_port | Use forwarded port header | False |
+| INVENTREE_CORS_ALLOW_CREDENTIALS | cors.allow_credentials | Allow cookies in cross-site requests | True |
 
 ## File Storage Locations
 
@@ -234,12 +264,9 @@ InvenTree provides allowance for additional sign-in options. The following optio
 
 ### Single Sign On
 
-SSO backends for all required authentication providers need to be added to the config file as a list under the key `social_backends`. The correct backend-name can be found in django-allauths [configuration documentation](https://django-allauth.readthedocs.io/en/latest/installation.html#django).
+Single Sign On (SSO) allows users to sign in to InvenTree using a third-party authentication provider. This functionality is provided by the [django-allauth](https://docs.allauth.org/en/latest/) package.
 
-If the selected providers need additional settings they must be added as dicts under the key `social_providers`. The correct settings can be found in the django-allauths [provider documentation](https://django-allauth.readthedocs.io/en/latest/providers.html).
-
-!!! warning "You are not done"
-    SSO still needs credentials for all providers and has to be enabled in the [global settings](../settings/global.md)!
+There are multiple configuration parameters which must be specified (either in your configuration file, or via environment variables) to enable SSO functionality. Refer to the [SSO documentation](../settings/SSO.md) for a guide on SSO configuration.
 
 !!! tip "More Info"
     Refer to the [SSO documentation](../settings/SSO.md) for more information.
@@ -250,8 +277,9 @@ The login-experience can be altered with the following settings:
 
 | Environment Variable | Configuration File | Description | Default |
 | --- | --- | --- | --- |
-| INVENTREE_LOGIN_CONFIRM_DAYS | login.confirm_days | Duration for which confirmation links are valid | 3 |
-| INVENTREE_LOGIN_ATTEMPTS | login.attempts | Count of allowed login attempts before blocking user | 5 |
+| INVENTREE_LOGIN_CONFIRM_DAYS | login_confirm_days | Duration for which confirmation links are valid | 3 |
+| INVENTREE_LOGIN_ATTEMPTS | login_attempts | Count of allowed login attempts before blocking user | 5 |
+| INVENTREE_LOGIN_DEFAULT_HTTP_PROTOCOL | login_default_protocol | Default protocol to use for login callbacks (e.g. using [SSO](#single-sign-on)) | http |
 
 ### Authentication Backends
 

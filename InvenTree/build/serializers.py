@@ -1,5 +1,7 @@
 """JSON serializers for Build API."""
 
+from decimal import Decimal
+
 from django.db import transaction
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils.translation import gettext_lazy as _
@@ -7,22 +9,25 @@ from django.utils.translation import gettext_lazy as _
 from django.db import models
 from django.db.models import ExpressionWrapper, F, FloatField
 from django.db.models import Case, Sum, When, Value
-from django.db.models import BooleanField
+from django.db.models import BooleanField, Q
 from django.db.models.functions import Coalesce
 
 from rest_framework import serializers
 from rest_framework.serializers import ValidationError
+
+from sql_util.utils import SubquerySum
 
 from InvenTree.serializers import InvenTreeModelSerializer, InvenTreeAttachmentSerializer
 from InvenTree.serializers import UserSerializer
 
 import InvenTree.helpers
 from InvenTree.serializers import InvenTreeDecimalField
-from InvenTree.status_codes import StockStatus
+from InvenTree.status_codes import BuildStatusGroups, StockStatus
 
 from stock.models import generate_batch_code, StockItem, StockLocation
 from stock.serializers import StockItemSerializerBrief, LocationSerializer
 
+import common.models
 from common.serializers import ProjectCodeSerializer
 import part.filters
 from part.serializers import BomItemSerializer, PartSerializer, PartBriefSerializer
@@ -129,7 +134,6 @@ class BuildSerializer(InvenTreeModelSerializer):
 
     def validate_reference(self, reference):
         """Custom validation for the Build reference field"""
-
         # Ensure the reference matches the required pattern
         Build.validate_reference_field(reference)
 
@@ -209,7 +213,6 @@ class BuildOutputQuantitySerializer(BuildOutputSerializer):
 
     def validate(self, data):
         """Validate the serializer data"""
-
         data = super().validate(data)
 
         output = data.get('output')
@@ -450,7 +453,6 @@ class BuildOutputScrapSerializer(serializers.Serializer):
 
     def save(self):
         """Save the serializer to scrap the build outputs"""
-
         build = self.context['build']
         request = self.context['request']
         data = self.validated_data
@@ -521,6 +523,17 @@ class BuildOutputCompleteSerializer(serializers.Serializer):
         super().validate(data)
 
         outputs = data.get('outputs', [])
+
+        if common.settings.prevent_build_output_complete_on_incompleted_tests():
+            errors = []
+            for output in outputs:
+                stock_item = output['output']
+                if stock_item.hasRequiredTests() and not stock_item.passedAllRequiredTests():
+                    serial = stock_item.serial
+                    errors.append(_(f"Build output {serial} has not passed all required tests"))
+
+            if errors:
+                raise ValidationError(errors)
 
         if len(outputs) == 0:
             raise ValidationError(_("A list of build outputs must be provided"))
@@ -625,7 +638,6 @@ class BuildCompleteSerializer(serializers.Serializer):
 
         This is so we can determine (at run time) whether the build is ready to be completed.
         """
-
         build = self.context['build']
 
         return {
@@ -866,10 +878,6 @@ class BuildAllocationItemSerializer(serializers.Serializer):
                 'output': _('Build output cannot be specified for allocation of untracked parts'),
             })
 
-        # Check if this allocation would be unique
-        if BuildItem.objects.filter(build_line=build_line, stock_item=stock_item, install_into=output).exists():
-            raise ValidationError(_('This stock item has already been allocated to this build output'))
-
         return data
 
 
@@ -912,14 +920,24 @@ class BuildAllocationSerializer(serializers.Serializer):
                 if build_line.bom_item.consumable:
                     continue
 
+                params = {
+                    "build_line": build_line,
+                    "stock_item": stock_item,
+                    "install_into": output,
+                }
+
                 try:
-                    # Create a new BuildItem to allocate stock
-                    BuildItem.objects.create(
-                        build_line=build_line,
-                        stock_item=stock_item,
-                        quantity=quantity,
-                        install_into=output
-                    )
+                    if build_item := BuildItem.objects.filter(**params).first():
+                        # Find an existing BuildItem for this stock item
+                        # If it exists, increase the quantity
+                        build_item.quantity += quantity
+                        build_item.save()
+                    else:
+                        # Create a new BuildItem to allocate stock
+                        build_item = BuildItem.objects.create(
+                            quantity=quantity,
+                            **params
+                        )
                 except (ValidationError, DjangoValidationError) as exc:
                     # Catch model errors and re-throw as DRF errors
                     raise ValidationError(detail=serializers.as_serializer_error(exc))
@@ -1023,7 +1041,7 @@ class BuildItemSerializer(InvenTreeModelSerializer):
         """Determine which extra details fields should be included"""
         part_detail = kwargs.pop('part_detail', True)
         location_detail = kwargs.pop('location_detail', True)
-        stock_detail = kwargs.pop('stock_detail', False)
+        stock_detail = kwargs.pop('stock_detail', True)
         build_detail = kwargs.pop('build_detail', False)
 
         super().__init__(*args, **kwargs)
@@ -1059,6 +1077,7 @@ class BuildLineSerializer(InvenTreeModelSerializer):
 
             # Annotated fields
             'allocated',
+            'in_production',
             'on_order',
             'available_stock',
             'available_substitute_stock',
@@ -1074,15 +1093,34 @@ class BuildLineSerializer(InvenTreeModelSerializer):
 
     quantity = serializers.FloatField()
 
+    bom_item = serializers.PrimaryKeyRelatedField(label=_('BOM Item'), read_only=True)
+
     # Foreign key fields
     bom_item_detail = BomItemSerializer(source='bom_item', many=False, read_only=True, pricing=False)
     part_detail = PartSerializer(source='bom_item.sub_part', many=False, read_only=True, pricing=False)
     allocations = BuildItemSerializer(many=True, read_only=True)
 
     # Annotated (calculated) fields
-    allocated = serializers.FloatField(read_only=True)
-    on_order = serializers.FloatField(read_only=True)
-    available_stock = serializers.FloatField(read_only=True)
+    allocated = serializers.FloatField(
+        label=_('Allocated Stock'),
+        read_only=True
+    )
+
+    on_order = serializers.FloatField(
+        label=_('On Order'),
+        read_only=True
+    )
+
+    in_production = serializers.FloatField(
+        label=_('In Production'),
+        read_only=True
+    )
+
+    available_stock = serializers.FloatField(
+        label=_('Available Stock'),
+        read_only=True
+    )
+
     available_substitute_stock = serializers.FloatField(read_only=True)
     available_variant_stock = serializers.FloatField(read_only=True)
     total_available_stock = serializers.FloatField(read_only=True)
@@ -1094,8 +1132,8 @@ class BuildLineSerializer(InvenTreeModelSerializer):
         - allocated: Total stock quantity allocated against this build line
         - available: Total stock available for allocation against this build line
         - on_order: Total stock on order for this build line
+        - in_production: Total stock currently in production for this build line
         """
-
         queryset = queryset.select_related(
             'build', 'bom_item',
         )
@@ -1130,6 +1168,11 @@ class BuildLineSerializer(InvenTreeModelSerializer):
         )
 
         ref = 'bom_item__sub_part__'
+
+        # Annotate the "in_production" quantity
+        queryset = queryset.annotate(
+            in_production=part.filters.annotate_in_production_quantity(reference=ref)
+        )
 
         # Annotate the "on_order" quantity
         # Difficulty: Medium

@@ -1,4 +1,4 @@
-"""Tests for labels"""
+"""Tests for labels."""
 
 import io
 import json
@@ -22,18 +22,13 @@ from .models import PartLabel, StockItemLabel, StockLocationLabel
 
 
 class LabelTest(InvenTreeAPITestCase):
-    """Unit test class for label models"""
+    """Unit test class for label models."""
 
-    fixtures = [
-        'category',
-        'part',
-        'location',
-        'stock'
-    ]
+    fixtures = ['category', 'part', 'location', 'stock']
 
     @classmethod
     def setUpTestData(cls):
-        """Ensure that some label instances exist as part of init routine"""
+        """Ensure that some label instances exist as part of init routine."""
         super().setUpTestData()
         apps.get_app_config('label').create_labels()
 
@@ -49,12 +44,9 @@ class LabelTest(InvenTreeAPITestCase):
 
     def test_default_files(self):
         """Test that label files exist in the MEDIA directory."""
+
         def test_subdir(ref_name):
-            item_dir = settings.MEDIA_ROOT.joinpath(
-                'label',
-                'inventree',
-                ref_name,
-            )
+            item_dir = settings.MEDIA_ROOT.joinpath('label', 'inventree', ref_name)
             self.assertTrue(len([item_dir.iterdir()]) > 0)
 
         test_subdir('stockitem')
@@ -63,13 +55,13 @@ class LabelTest(InvenTreeAPITestCase):
 
     def test_filters(self):
         """Test the label filters."""
-        filter_string = "part__pk=10"
+        filter_string = 'part__pk=10'
 
         filters = validateFilterString(filter_string, model=StockItem)
 
         self.assertEqual(type(filters), dict)
 
-        bad_filter_string = "part_pk=10"
+        bad_filter_string = 'part_pk=10'
 
         with self.assertRaises(ValidationError):
             validateFilterString(bad_filter_string, model=StockItem)
@@ -94,7 +86,6 @@ class LabelTest(InvenTreeAPITestCase):
 
     def test_print_part_label(self):
         """Actually 'print' a label, and ensure that the correct information is contained."""
-
         label_data = """
         {% load barcode %}
         {% load report %}
@@ -107,7 +98,7 @@ class LabelTest(InvenTreeAPITestCase):
         <!-- Test InvenTree URL -->
         url: {{ qr_url|safe }}
         <!-- Test image URL generation -->
-        image: {% part_image part %}
+        image: {% part_image part width=128 %}
         <!-- Test InvenTree logo -->
         logo: {% logo_image %}
         </html>
@@ -116,14 +107,11 @@ class LabelTest(InvenTreeAPITestCase):
         buffer = io.StringIO()
         buffer.write(label_data)
 
-        template = ContentFile(buffer.getvalue(), "label.html")
+        template = ContentFile(buffer.getvalue(), 'label.html')
 
         # Construct a label template
         label = PartLabel.objects.create(
-            name='test',
-            description='Test label',
-            enabled=True,
-            label=template,
+            name='test', description='Test label', enabled=True, label=template
         )
 
         # Ensure we are in "debug" mode (so the report is generated as HTML)
@@ -136,7 +124,9 @@ class LabelTest(InvenTreeAPITestCase):
         # Print via the API (Note: will default to the builtin plugin if no plugin supplied)
         url = reverse('api-part-label-print', kwargs={'pk': label.pk})
 
-        part_pk = Part.objects.first().pk
+        prt = Part.objects.first()
+        part_pk = prt.pk
+        part_name = prt.name
 
         response = self.get(f'{url}?parts={part_pk}', expected_code=200)
         data = json.loads(response.content)
@@ -150,11 +140,12 @@ class LabelTest(InvenTreeAPITestCase):
             content = f.read()
 
         # Test that each element has been rendered correctly
-        self.assertIn("part: 1 - M2x4 LPHS", content)
+        self.assertIn(f'part: {part_pk} - {part_name}', content)
         self.assertIn(f'data: {{"part": {part_pk}}}', content)
-        self.assertIn("http://testserver/part/1/", content)
-        self.assertIn("img/blank_image.png", content)
-        self.assertIn("img/inventree.png", content)
+        self.assertIn(f'http://testserver/part/{part_pk}/', content)
+
+        # Check that a encoded image has been generated
+        self.assertIn('data:image/png;charset=utf-8;base64,', content)
 
     def test_metadata(self):
         """Unit tests for the metadata field."""

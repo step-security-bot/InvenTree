@@ -1,6 +1,9 @@
 import { Trans } from '@lingui/macro';
+import { openContextModal } from '@mantine/modals';
 
 import { DocumentationLinkItem } from '../components/items/DocumentationLinks';
+import { StylishText } from '../components/items/StylishText';
+import { IS_DEV_OR_DEMO } from '../main';
 
 export const footerLinks = [
   {
@@ -22,11 +25,15 @@ export const footerLinks = [
 export const navTabs = [
   { text: <Trans>Home</Trans>, name: 'home' },
   { text: <Trans>Dashboard</Trans>, name: 'dashboard' },
-  { text: <Trans>Playground</Trans>, name: 'playground' },
-  { text: <Trans>Parts</Trans>, name: 'parts' },
+  { text: <Trans>Parts</Trans>, name: 'part' },
   { text: <Trans>Stock</Trans>, name: 'stock' },
-  { text: <Trans>Build</Trans>, name: 'build' }
+  { text: <Trans>Build</Trans>, name: 'build' },
+  { text: <Trans>Purchasing</Trans>, name: 'purchasing' },
+  { text: <Trans>Sales</Trans>, name: 'sales' }
 ];
+if (IS_DEV_OR_DEMO) {
+  navTabs.push({ text: <Trans>Playground</Trans>, name: 'playground' });
+}
 
 export const docLinks = {
   app: 'https://docs.inventree.org/en/latest/app/app/',
@@ -64,21 +71,45 @@ export const navDocLinks: DocumentationLinkItem[] = [
   }
 ];
 
+function serverInfo() {
+  return openContextModal({
+    modal: 'info',
+    title: (
+      <StylishText size="xl">
+        <Trans>System Information</Trans>
+      </StylishText>
+    ),
+    size: 'xl',
+    innerProps: {}
+  });
+}
+
+function aboutInvenTree() {
+  return openContextModal({
+    modal: 'about',
+    title: (
+      <StylishText size="xl">
+        <Trans>About InvenTree</Trans>
+      </StylishText>
+    ),
+    size: 'xl',
+    innerProps: {}
+  });
+}
+
 // TODO @matmair: Add the following pages and adjust the links
 export const aboutLinks: DocumentationLinkItem[] = [
   {
     id: 'instance',
-    title: <Trans>Instance</Trans>,
+    title: <Trans>System Information</Trans>,
     description: <Trans>About this Inventree instance</Trans>,
-    link: '/instance',
-    placeholder: true
+    action: serverInfo
   },
   {
     id: 'about',
-    title: <Trans>InvenTree</Trans>,
+    title: <Trans>About InvenTree</Trans>,
     description: <Trans>About the InvenTree org</Trans>,
-    link: '/about',
-    placeholder: true
+    action: aboutInvenTree
   },
   {
     id: 'licenses',

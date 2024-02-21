@@ -106,7 +106,7 @@
                 <tr>
                     <td><span class='fas fa-link'></span></td>
                     <td>{% trans "External Link" %}</td>
-                    <td>{% include 'clip_link.html' with link=build.link %}</td>
+                    <td>{% include 'clip_link.html' with link=build.link new_window=True %}</td>
                 </tr>
                 {% endif %}
                 {% if build.issued_by %}
@@ -373,7 +373,11 @@ onPanelLoad('allocate', function() {
     loadBuildLineTable(
         "#build-lines-table",
         {{ build.pk }},
-        {}
+        {
+            {% if build.project_code %}
+            project_code: {{ build.project_code.pk }},
+            {% endif %}
+        }
     );
 });
 
@@ -419,8 +423,8 @@ function allocateSelectedLines() {
 
     if (unallocated_lines.length == 0) {
         showAlertDialog(
-            '{% trans "Allocation Complete" %}',
-            '{% trans "All lines have been fully allocated" %}',
+            '{% trans "Allocation Complete" escape %}',
+            '{% trans "All lines have been fully allocated" escape %}',
         );
     } else {
 

@@ -128,6 +128,10 @@ function partFields(options={}) {
             filters: {
                 structural: false,
             },
+            tree_picker: {
+                url: '{% url "api-part-category-tree" %}',
+                default_icon: global_settings.PART_CATEGORY_DEFAULT_ICON,
+            },
         },
         name: {},
         IPN: {},
@@ -147,7 +151,11 @@ function partFields(options={}) {
             icon: 'fa-sitemap',
             filters: {
                 structural: false,
-            }
+            },
+            tree_picker: {
+                url: '{% url "api-location-tree" %}',
+                default_icon: global_settings.STOCK_LOCATION_DEFAULT_ICON,
+            },
         },
         default_supplier: {
             icon: 'fa-building',
@@ -164,6 +172,9 @@ function partFields(options={}) {
         },
         responsible: {
             icon: 'fa-user',
+            filters: {
+                is_active: true,
+            }
         },
         component: {
             default: global_settings.PART_COMPONENT,
@@ -275,6 +286,10 @@ function partFields(options={}) {
             value: global_settings.PART_COPY_BOM,
         };
 
+        fields.duplicate__copy_notes = {
+            value: true,
+        }
+
         fields.duplicate__copy_parameters = {
             value: global_settings.PART_COPY_PARAMETERS,
         };
@@ -292,6 +307,10 @@ function categoryFields(options={}) {
         parent: {
             help_text: '{% trans "Parent part category" %}',
             required: false,
+            tree_picker: {
+                url: '{% url "api-part-category-tree" %}',
+                default_icon: global_settings.PART_CATEGORY_DEFAULT_ICON,
+            },
         },
         name: {},
         description: {},
@@ -299,7 +318,11 @@ function categoryFields(options={}) {
             icon: 'fa-sitemap',
             filters: {
                 structural: false,
-            }
+            },
+            tree_picker: {
+                url: '{% url "api-location-tree" %}',
+                default_icon: global_settings.STOCK_LOCATION_DEFAULT_ICON,
+            },
         },
         default_keywords: {
             icon: 'fa-key',
@@ -1789,12 +1812,13 @@ function loadPartPurchaseOrderTable(table, part_id, options={}) {
                 formatter: function(value, row) {
                     let data = value;
 
-                    if (row.supplier_part_detail.pack_quantity_native != 1.0) {
-                        let total = value * row.supplier_part_detail.pack_quantity_native;
+                    if (row.supplier_part_detail && row.supplier_part_detail.pack_quantity_native != 1.0) {
+                        let pq = row.supplier_part_detail.pack_quantity_native;
+                        let total = value * pq;
 
                         data += makeIconBadge(
                             'fa-info-circle icon-blue',
-                            `{% trans "Pack Quantity" %}: ${row.pack_quantity} - {% trans "Total Quantity" %}: ${total}`
+                            `{% trans "Pack Quantity" %}: ${pq} - {% trans "Total Quantity" %}: ${total}`
                         );
                     }
 
@@ -1847,9 +1871,10 @@ function loadPartPurchaseOrderTable(table, part_id, options={}) {
                 formatter: function(value, row) {
                     var data = value;
 
-                    if (value > 0 && row.supplier_part_detail.pack_quantity_native != 1.0) {
-                        let total = value * row.supplier_part_detail.pack_quantity_native;
-                        data += `<span class='fas fa-info-circle icon-blue float-right' title='{% trans "Pack Quantity" %}: ${row.pack_quantity} - {% trans "Total Quantity" %}: ${total}'></span>`;
+                    if (value > 0 && row.supplier_part_detail && row.supplier_part_detail.pack_quantity_native != 1.0) {
+                        let pq = row.supplier_part_detail.pack_quantity_native;
+                        let total = value * pq;
+                        data += `<span class='fas fa-info-circle icon-blue float-right' title='{% trans "Pack Quantity" %}: ${pq} - {% trans "Total Quantity" %}: ${total}'></span>`;
                     }
 
                     return data;
@@ -2181,7 +2206,12 @@ function setPartCategory(data, options={}) {
         method: 'POST',
         preFormContent: html,
         fields: {
-            category: {},
+            category: {
+                tree_picker: {
+                    url: '{% url "api-part-category-tree" %}',
+                    default_icon: global_settings.PART_CATEGORY_DEFAULT_ICON,
+                },
+            },
         },
         processBeforeUpload: function(data) {
             data.parts = parts;
@@ -2788,6 +2818,7 @@ function partTestTemplateFields(options={}) {
         required: {},
         requires_value: {},
         requires_attachment: {},
+        enabled: {},
         part: {
             hidden: true,
         }
@@ -2832,15 +2863,36 @@ function loadPartTestTemplateTable(table, options) {
                 field: 'pk',
                 title: 'ID',
                 visible: false,
+                switchable: false,
             },
             {
                 field: 'test_name',
                 title: '{% trans "Test Name" %}',
                 sortable: true,
+                formatter: function(value, row) {
+                    let html = value;
+
+                    if (row.results && row.results > 0) {
+                        html += `
+                        <span class='badge bg-dark rounded-pill float-right' title='${row.results} {% trans "results" %}'>
+                            ${row.results}
+                        </span>`;
+                    }
+
+                    return html;
+                }
             },
             {
                 field: 'description',
                 title: '{% trans "Description" %}',
+            },
+            {
+                field: 'enabled',
+                title: '{% trans "Enabled" %}',
+                sortable: true,
+                formatter: function(value) {
+                    return yesNoLabel(value);
+                }
             },
             {
                 field: 'required',
@@ -2879,7 +2931,7 @@ function loadPartTestTemplateTable(table, options) {
                     } else {
                         var text = '{% trans "This test is defined for a parent part" %}';
 
-                        return renderLink(text, `/part/${row.part}/tests/`);
+                        return renderLink(text, `/part/${row.part}/?display=test-templates`);
                     }
                 }
             }

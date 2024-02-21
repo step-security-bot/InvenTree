@@ -2,8 +2,9 @@ import { Trans, t } from '@lingui/macro';
 import {
   Anchor,
   Button,
+  Divider,
   Group,
-  Paper,
+  Loader,
   PasswordInput,
   Stack,
   Text,
@@ -13,9 +14,15 @@ import { useForm } from '@mantine/form';
 import { useDisclosure } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import { IconCheck } from '@tabler/icons-react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { doClassicLogin, doSimpleLogin } from '../../functions/auth';
+import { api } from '../../App';
+import { ApiEndpoints } from '../../enums/ApiEndpoints';
+import { doBasicLogin, doSimpleLogin } from '../../functions/auth';
+import { apiUrl, useServerApiState } from '../../states/ApiState';
+import { useSessionState } from '../../states/SessionState';
+import { SsoButton } from '../buttons/SSOButton';
 
 export function AuthenticationForm() {
   const classicForm = useForm({
@@ -23,21 +30,22 @@ export function AuthenticationForm() {
   });
   const simpleForm = useForm({ initialValues: { email: '' } });
   const [classicLoginMode, setMode] = useDisclosure(true);
+  const [auth_settings] = useServerApiState((state) => [state.auth_settings]);
   const navigate = useNavigate();
 
+  const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);
+
   function handleLogin() {
+    setIsLoggingIn(true);
+
     if (classicLoginMode === true) {
-      doClassicLogin(
+      doBasicLogin(
         classicForm.values.username,
         classicForm.values.password
-      ).then((ret) => {
-        if (ret === false) {
-          notifications.show({
-            title: t`Login failed`,
-            message: t`Check your input and try again.`,
-            color: 'red'
-          });
-        } else {
+      ).then(() => {
+        setIsLoggingIn(false);
+
+        if (useSessionState.getState().hasToken()) {
           notifications.show({
             title: t`Login successful`,
             message: t`Welcome back!`,
@@ -45,10 +53,18 @@ export function AuthenticationForm() {
             icon: <IconCheck size="1rem" />
           });
           navigate('/home');
+        } else {
+          notifications.show({
+            title: t`Login failed`,
+            message: t`Check your input and try again.`,
+            color: 'red'
+          });
         }
       });
     } else {
       doSimpleLogin(simpleForm.values.email).then((ret) => {
+        setIsLoggingIn(false);
+
         if (ret?.status === 'ok') {
           notifications.show({
             title: t`Mail delivery successful`,
@@ -69,17 +85,29 @@ export function AuthenticationForm() {
   }
 
   return (
-    <Paper radius="md" p="xl" withBorder>
-      <Text size="lg" weight={500}>
-        <Trans>Welcome, log in below</Trans>
-      </Text>
+    <>
+      {auth_settings?.sso_enabled === true ? (
+        <>
+          <Group grow mb="md" mt="md">
+            {auth_settings.providers.map((provider) => (
+              <SsoButton provider={provider} key={provider.id} />
+            ))}
+          </Group>
+
+          <Divider
+            label={t`Or continue with other methods`}
+            labelPosition="center"
+            my="lg"
+          />
+        </>
+      ) : null}
       <form onSubmit={classicForm.onSubmit(() => {})}>
         {classicLoginMode ? (
-          <Stack>
+          <Stack spacing={0}>
             <TextInput
               required
               label={t`Username`}
-              placeholder="reader"
+              placeholder={t`Your username`}
               {...classicForm.getInputProps('username')}
             />
             <PasswordInput
@@ -88,17 +116,19 @@ export function AuthenticationForm() {
               placeholder={t`Your password`}
               {...classicForm.getInputProps('password')}
             />
-            <Group position="apart" mt="0">
-              <Anchor
-                component="button"
-                type="button"
-                color="dimmed"
-                size="xs"
-                onClick={() => navigate('/reset-password')}
-              >
-                <Trans>Reset password</Trans>
-              </Anchor>
-            </Group>
+            {auth_settings?.password_forgotten_enabled === true && (
+              <Group position="apart" mt="0">
+                <Anchor
+                  component="button"
+                  type="button"
+                  color="dimmed"
+                  size="xs"
+                  onClick={() => navigate('/reset-password')}
+                >
+                  <Trans>Reset password</Trans>
+                </Anchor>
+              </Group>
+            )}
           </Stack>
         ) : (
           <Stack>
@@ -106,7 +136,7 @@ export function AuthenticationForm() {
               required
               label={t`Email`}
               description={t`We will send you a link to login - if you are registered`}
-              placeholder="reader@example.org"
+              placeholder="email@example.org"
               {...simpleForm.getInputProps('email')}
             />
           </Stack>
@@ -123,18 +153,174 @@ export function AuthenticationForm() {
             {classicLoginMode ? (
               <Trans>Send me an email</Trans>
             ) : (
-              <Trans>I will use username and password</Trans>
+              <Trans>Use username and password</Trans>
             )}
           </Anchor>
-          <Button type="submit" onClick={handleLogin}>
-            {classicLoginMode ? (
-              <Trans>Log in</Trans>
+          <Button type="submit" disabled={isLoggingIn} onClick={handleLogin}>
+            {isLoggingIn ? (
+              <Loader size="sm" />
             ) : (
-              <Trans>Send mail</Trans>
+              <>
+                {classicLoginMode ? (
+                  <Trans>Log In</Trans>
+                ) : (
+                  <Trans>Send Email</Trans>
+                )}
+              </>
             )}
           </Button>
         </Group>
       </form>
-    </Paper>
+    </>
+  );
+}
+
+export function RegistrationForm() {
+  const registrationForm = useForm({
+    initialValues: { username: '', email: '', password1: '', password2: '' }
+  });
+  const navigate = useNavigate();
+  const [auth_settings] = useServerApiState((state) => [state.auth_settings]);
+  const [isRegistering, setIsRegistering] = useState<boolean>(false);
+
+  function handleRegistration() {
+    setIsRegistering(true);
+    api
+      .post(apiUrl(ApiEndpoints.user_register), registrationForm.values, {
+        headers: { Authorization: '' }
+      })
+      .then((ret) => {
+        if (ret?.status === 204) {
+          setIsRegistering(false);
+          notifications.show({
+            title: t`Registration successful`,
+            message: t`Please confirm your email address to complete the registration`,
+            color: 'green',
+            icon: <IconCheck size="1rem" />
+          });
+          navigate('/home');
+        }
+      })
+      .catch((err) => {
+        if (err.response.status === 400) {
+          setIsRegistering(false);
+          for (const [key, value] of Object.entries(err.response.data)) {
+            registrationForm.setFieldError(key, value as string);
+          }
+          let err_msg = '';
+          if (err.response?.data?.non_field_errors) {
+            err_msg = err.response.data.non_field_errors;
+          }
+          notifications.show({
+            title: t`Input error`,
+            message: t`Check your input and try again. ` + err_msg,
+            color: 'red',
+            autoClose: 30000
+          });
+        }
+      });
+  }
+
+  const both_reg_enabled =
+    auth_settings?.registration_enabled && auth_settings?.sso_registration;
+  return (
+    <>
+      {auth_settings?.registration_enabled && (
+        <form onSubmit={registrationForm.onSubmit(() => {})}>
+          <Stack spacing={0}>
+            <TextInput
+              required
+              label={t`Username`}
+              placeholder={t`Your username`}
+              {...registrationForm.getInputProps('username')}
+            />
+            <TextInput
+              required
+              label={t`Email`}
+              description={t`This will be used for a confirmation`}
+              placeholder="email@example.org"
+              {...registrationForm.getInputProps('email')}
+            />
+            <PasswordInput
+              required
+              label={t`Password`}
+              placeholder={t`Your password`}
+              {...registrationForm.getInputProps('password1')}
+            />
+            <PasswordInput
+              required
+              label={t`Password repeat`}
+              placeholder={t`Repeat password`}
+              {...registrationForm.getInputProps('password2')}
+            />
+          </Stack>
+
+          <Group position="apart" mt="xl">
+            <Button
+              type="submit"
+              disabled={isRegistering}
+              onClick={handleRegistration}
+              fullWidth
+            >
+              <Trans>Register</Trans>
+            </Button>
+          </Group>
+        </form>
+      )}
+      {both_reg_enabled && (
+        <Divider label={t`Or use SSO`} labelPosition="center" my="lg" />
+      )}
+      {auth_settings?.sso_registration === true && (
+        <Group grow mb="md" mt="md">
+          {auth_settings.providers.map((provider) => (
+            <SsoButton provider={provider} key={provider.id} />
+          ))}
+        </Group>
+      )}
+    </>
+  );
+}
+
+export function ModeSelector({
+  loginMode,
+  setMode
+}: {
+  loginMode: boolean;
+  setMode: any;
+}) {
+  const [auth_settings] = useServerApiState((state) => [state.auth_settings]);
+  const registration_enabled =
+    auth_settings?.registration_enabled ||
+    auth_settings?.sso_registration ||
+    false;
+
+  if (registration_enabled === false) return null;
+  return (
+    <Text ta="center" size={'xs'} mt={'md'}>
+      {loginMode ? (
+        <>
+          <Trans>Don&apos;t have an account?</Trans>{' '}
+          <Anchor
+            component="button"
+            type="button"
+            color="dimmed"
+            size="xs"
+            onClick={() => setMode.close()}
+          >
+            <Trans>Register</Trans>
+          </Anchor>
+        </>
+      ) : (
+        <Anchor
+          component="button"
+          type="button"
+          color="dimmed"
+          size="xs"
+          onClick={() => setMode.open()}
+        >
+          <Trans>Go back to login</Trans>
+        </Anchor>
+      )}
+    </Text>
   );
 }

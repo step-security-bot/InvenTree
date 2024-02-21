@@ -30,29 +30,28 @@ def is_email_configured():
 
         # Display warning unless in test mode
         if not testing:  # pragma: no cover
-            logger.debug("EMAIL_HOST is not configured")
+            logger.debug('EMAIL_HOST is not configured')
 
     # Display warning unless in test mode
     if not settings.EMAIL_HOST_USER and not testing:  # pragma: no cover
-        logger.debug("EMAIL_HOST_USER is not configured")
+        logger.debug('EMAIL_HOST_USER is not configured')
 
     # Display warning unless in test mode
     if not settings.EMAIL_HOST_PASSWORD and testing:  # pragma: no cover
-        logger.debug("EMAIL_HOST_PASSWORD is not configured")
+        logger.debug('EMAIL_HOST_PASSWORD is not configured')
 
     # Email sender must be configured
     if not settings.DEFAULT_FROM_EMAIL:
         configured = False
 
         if not testing:  # pragma: no cover
-            logger.warning("DEFAULT_FROM_EMAIL is not configured")
+            logger.debug('DEFAULT_FROM_EMAIL is not configured')
 
     return configured
 
 
 def send_email(subject, body, recipients, from_email=None, html_message=None):
     """Send an email with the specified subject and body, to the specified recipients list."""
-
     if isinstance(recipients, str):
         recipients = [recipients]
 
@@ -76,7 +75,7 @@ def send_email(subject, body, recipients, from_email=None, html_message=None):
             if settings.TESTING:
                 from_email = 'from@test.com'
             else:
-                logger.error("send_email failed: DEFAULT_FROM_EMAIL not specified")
+                logger.error('send_email failed: DEFAULT_FROM_EMAIL not specified')
                 return
 
     InvenTree.tasks.offload_task(
@@ -86,5 +85,5 @@ def send_email(subject, body, recipients, from_email=None, html_message=None):
         from_email,
         recipients,
         fail_silently=False,
-        html_message=html_message
+        html_message=html_message,
     )

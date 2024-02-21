@@ -6,24 +6,24 @@ from urllib.parse import urlencode
 from django import forms
 from django.conf import settings
 from django.contrib.auth.models import Group, User
-from django.contrib.sites.models import Site
 from django.http import HttpResponseRedirect
 from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
 
 from allauth.account.adapter import DefaultAccountAdapter
-from allauth.account.forms import SignupForm, set_form_field_order
-from allauth.exceptions import ImmediateHttpResponse
+from allauth.account.forms import LoginForm, SignupForm, set_form_field_order
+from allauth.core.exceptions import ImmediateHttpResponse
 from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
 from allauth_2fa.adapter import OTPAdapter
 from allauth_2fa.utils import user_has_valid_totp_device
-from crispy_forms.bootstrap import (AppendedText, PrependedAppendedText,
-                                    PrependedText)
+from crispy_forms.bootstrap import AppendedText, PrependedAppendedText, PrependedText
 from crispy_forms.helper import FormHelper
 from crispy_forms.layout import Field, Layout
 from dj_rest_auth.registration.serializers import RegisterSerializer
 from rest_framework import serializers
 
+import InvenTree.helpers_model
+import InvenTree.sso
 from common.models import InvenTreeSetting
 from InvenTree.exceptions import log_error
 
@@ -67,10 +67,10 @@ class HelperForm(forms.ModelForm):
 
             # Look for font-awesome icons
             if prefix and prefix.startswith('fa-'):
-                prefix = r"<i class='fas {fa}'/>".format(fa=prefix)
+                prefix = f"<i class='fas {prefix}'/>"
 
             if suffix and suffix.startswith('fa-'):
-                suffix = r"<i class='fas {fa}'/>".format(fa=suffix)
+                suffix = f"<i class='fas {suffix}'/>"
 
             if prefix and suffix:
                 layouts.append(
@@ -79,31 +79,19 @@ class HelperForm(forms.ModelForm):
                             field,
                             prepended_text=prefix,
                             appended_text=suffix,
-                            placeholder=placeholder
+                            placeholder=placeholder,
                         )
                     )
                 )
 
             elif prefix:
                 layouts.append(
-                    Field(
-                        PrependedText(
-                            field,
-                            prefix,
-                            placeholder=placeholder
-                        )
-                    )
+                    Field(PrependedText(field, prefix, placeholder=placeholder))
                 )
 
             elif suffix:
                 layouts.append(
-                    Field(
-                        AppendedText(
-                            field,
-                            suffix,
-                            placeholder=placeholder
-                        )
-                    )
+                    Field(AppendedText(field, suffix, placeholder=placeholder))
                 )
 
             else:
@@ -119,10 +107,7 @@ class EditUserForm(HelperForm):
         """Metaclass options."""
 
         model = User
-        fields = [
-            'first_name',
-            'last_name',
-        ]
+        fields = ['first_name', 'last_name']
 
 
 class SetPasswordForm(HelperForm):
@@ -132,11 +117,7 @@ class SetPasswordForm(HelperForm):
         """Metaclass options."""
 
         model = User
-        fields = [
-            'enter_password',
-            'confirm_password',
-            'old_password',
-        ]
+        fields = ['enter_password', 'confirm_password', 'old_password']
 
     enter_password = forms.CharField(
         max_length=100,
@@ -145,7 +126,7 @@ class SetPasswordForm(HelperForm):
         initial='',
         widget=forms.PasswordInput(attrs={'autocomplete': 'off'}),
         label=_('Enter password'),
-        help_text=_('Enter new password')
+        help_text=_('Enter new password'),
     )
 
     confirm_password = forms.CharField(
@@ -155,17 +136,37 @@ class SetPasswordForm(HelperForm):
         initial='',
         widget=forms.PasswordInput(attrs={'autocomplete': 'off'}),
         label=_('Confirm password'),
-        help_text=_('Confirm new password')
+        help_text=_('Confirm new password'),
     )
 
     old_password = forms.CharField(
-        label=_("Old password"),
+        label=_('Old password'),
         strip=False,
-        widget=forms.PasswordInput(attrs={'autocomplete': 'current-password', 'autofocus': True}),
+        required=False,
+        widget=forms.PasswordInput(
+            attrs={'autocomplete': 'current-password', 'autofocus': True}
+        ),
     )
 
 
 # override allauth
+class CustomLoginForm(LoginForm):
+    """Custom login form to override default allauth behaviour."""
+
+    def login(self, request, redirect_url=None):
+        """Perform login action.
+
+        First check that:
+        - A valid user has been supplied
+        """
+        if not self.user:
+            # No user supplied - redirect to the login page
+            return HttpResponseRedirect(reverse('account_login'))
+
+        # Now perform default login action
+        return super().login(request, redirect_url)
+
+
 class CustomSignupForm(SignupForm):
     """Override to use dynamic settings."""
 
@@ -177,40 +178,52 @@ class CustomSignupForm(SignupForm):
 
         # check for two mail fields
         if InvenTreeSetting.get_setting('LOGIN_SIGNUP_MAIL_TWICE'):
-            self.fields["email2"] = forms.EmailField(
-                label=_("Email (again)"),
+            self.fields['email2'] = forms.EmailField(
+                label=_('Email (again)'),
                 widget=forms.TextInput(
                     attrs={
-                        "type": "email",
-                        "placeholder": _("Email address confirmation"),
+                        'type': 'email',
+                        'placeholder': _('Email address confirmation'),
                     }
                 ),
             )
 
         # check for two password fields
         if not InvenTreeSetting.get_setting('LOGIN_SIGNUP_PWD_TWICE'):
-            self.fields.pop("password2")
+            self.fields.pop('password2')
 
         # reorder fields
-        set_form_field_order(self, ["username", "email", "email2", "password1", "password2", ])
+        set_form_field_order(
+            self, ['username', 'email', 'email2', 'password1', 'password2']
+        )
 
     def clean(self):
-        """Make sure the supllied emails match if enabled in settings."""
+        """Make sure the supplied emails match if enabled in settings."""
         cleaned_data = super().clean()
 
         # check for two mail fields
         if InvenTreeSetting.get_setting('LOGIN_SIGNUP_MAIL_TWICE'):
-            email = cleaned_data.get("email")
-            email2 = cleaned_data.get("email2")
+            email = cleaned_data.get('email')
+            email2 = cleaned_data.get('email2')
             if (email and email2) and email != email2:
-                self.add_error("email2", _("You must type the same email each time."))
+                self.add_error('email2', _('You must type the same email each time.'))
 
         return cleaned_data
 
 
 def registration_enabled():
     """Determine whether user registration is enabled."""
-    return settings.EMAIL_HOST and (InvenTreeSetting.get_setting('LOGIN_ENABLE_REG') or InvenTreeSetting.get_setting('LOGIN_ENABLE_SSO_REG'))
+    if (
+        InvenTreeSetting.get_setting('LOGIN_ENABLE_REG')
+        or InvenTree.sso.registration_enabled()
+    ):
+        if settings.EMAIL_HOST:
+            return True
+        else:
+            logger.error(
+                'Registration cannot be enabled, because EMAIL_HOST is not configured.'
+            )
+    return False
 
 
 class RegistratonMixin:
@@ -227,25 +240,31 @@ class RegistratonMixin:
 
     def clean_email(self, email):
         """Check if the mail is valid to the pattern in LOGIN_SIGNUP_MAIL_RESTRICTION (if enabled in settings)."""
-        mail_restriction = InvenTreeSetting.get_setting('LOGIN_SIGNUP_MAIL_RESTRICTION', None)
+        mail_restriction = InvenTreeSetting.get_setting(
+            'LOGIN_SIGNUP_MAIL_RESTRICTION', None
+        )
         if not mail_restriction:
             return super().clean_email(email)
 
         split_email = email.split('@')
         if len(split_email) != 2:
-            logger.error(f'The user {email} has an invalid email address')
-            raise forms.ValidationError(_('The provided primary email address is not valid.'))
+            logger.error('The user %s has an invalid email address', email)
+            raise forms.ValidationError(
+                _('The provided primary email address is not valid.')
+            )
 
         mailoptions = mail_restriction.split(',')
         for option in mailoptions:
             if not option.startswith('@'):
                 log_error('LOGIN_SIGNUP_MAIL_RESTRICTION is not configured correctly')
-                raise forms.ValidationError(_('The provided primary email address is not valid.'))
+                raise forms.ValidationError(
+                    _('The provided primary email address is not valid.')
+                )
             else:
                 if split_email[1] == option[1:]:
                     return super().clean_email(email)
 
-        logger.info(f'The provided email domain for {email} is not approved')
+        logger.info('The provided email domain for %s is not approved', email)
         raise forms.ValidationError(_('The provided email domain is not approved.'))
 
     def save_user(self, request, user, form, commit=True):
@@ -260,7 +279,10 @@ class RegistratonMixin:
                 group = Group.objects.get(id=start_group)
                 user.groups.add(group)
             except Group.DoesNotExist:
-                logger.error('The setting `SIGNUP_GROUP` contains an non existent group', start_group)
+                logger.exception(
+                    'The setting `SIGNUP_GROUP` contains an non existent group',
+                    start_group,
+                )
         user.save()
         return user
 
@@ -270,11 +292,14 @@ class CustomUrlMixin:
 
     def get_email_confirmation_url(self, request, emailconfirmation):
         """Custom email confirmation (activation) url."""
-        url = reverse("account_confirm_email", args=[emailconfirmation.key])
-        return Site.objects.get_current().domain + url
+        url = reverse('account_confirm_email', args=[emailconfirmation.key])
+
+        return InvenTree.helpers_model.construct_absolute_url(url)
 
 
-class CustomAccountAdapter(CustomUrlMixin, RegistratonMixin, OTPAdapter, DefaultAccountAdapter):
+class CustomAccountAdapter(
+    CustomUrlMixin, RegistratonMixin, OTPAdapter, DefaultAccountAdapter
+):
     """Override of adapter to use dynamic settings."""
 
     def send_mail(self, template_prefix, email, context):
@@ -292,8 +317,18 @@ class CustomAccountAdapter(CustomUrlMixin, RegistratonMixin, OTPAdapter, Default
 
         return False
 
+    def get_email_confirmation_url(self, request, emailconfirmation):
+        """Construct the email confirmation url."""
+        from InvenTree.helpers_model import construct_absolute_url
 
-class CustomSocialAccountAdapter(CustomUrlMixin, RegistratonMixin, DefaultSocialAccountAdapter):
+        url = super().get_email_confirmation_url(request, emailconfirmation)
+        url = construct_absolute_url(url)
+        return url
+
+
+class CustomSocialAccountAdapter(
+    CustomUrlMixin, RegistratonMixin, DefaultSocialAccountAdapter
+):
     """Override of adapter to use dynamic settings."""
 
     def is_auto_signup_allowed(self, request, sociallogin):
@@ -320,17 +355,32 @@ class CustomSocialAccountAdapter(CustomUrlMixin, RegistratonMixin, DefaultSocial
             if request.GET:
                 redirect_url += '?' + urlencode(request.GET)
 
-            raise ImmediateHttpResponse(
-                response=HttpResponseRedirect(redirect_url)
-            )
+            raise ImmediateHttpResponse(response=HttpResponseRedirect(redirect_url))
 
         # Otherwise defer to the original allauth adapter.
         return super().login(request, user)
+
+    def authentication_error(
+        self, request, provider_id, error=None, exception=None, extra_context=None
+    ):
+        """Callback method for authentication errors."""
+        if not error:
+            error = request.GET.get('error', None)
+
+        if not exception:
+            exception = request.GET.get('error_description', None)
+
+        path = request.path or 'sso'
+
+        # Log the error to the database
+        log_error(path, error_name=error, error_data=exception)
+        logger.error("SSO error for provider '%s' - check admin error log", provider_id)
 
 
 # override dj-rest-auth
 class CustomRegisterSerializer(RegisterSerializer):
     """Override of serializer to use dynamic settings."""
+
     email = serializers.EmailField()
 
     def __init__(self, instance=None, data=..., **kwargs):

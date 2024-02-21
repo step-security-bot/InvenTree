@@ -1,7 +1,7 @@
 """JSON API for the Build app."""
 
 from django.db.models import F, Q
-from django.urls import include, path, re_path
+from django.urls import include, path
 from django.utils.translation import gettext_lazy as _
 from django.contrib.auth.models import User
 
@@ -35,6 +35,7 @@ class BuildFilter(rest_filters.FilterSet):
             'parent',
             'sales_order',
             'part',
+            'issued_by',
         ]
 
     status = rest_filters.NumberFilter(label='Status')
@@ -45,8 +46,7 @@ class BuildFilter(rest_filters.FilterSet):
         """Filter the queryset to either include or exclude orders which are active."""
         if str2bool(value):
             return queryset.filter(status__in=BuildStatusGroups.ACTIVE_CODES)
-        else:
-            return queryset.exclude(status__in=BuildStatusGroups.ACTIVE_CODES)
+        return queryset.exclude(status__in=BuildStatusGroups.ACTIVE_CODES)
 
     overdue = rest_filters.BooleanFilter(label='Build is overdue', method='filter_overdue')
 
@@ -54,8 +54,7 @@ class BuildFilter(rest_filters.FilterSet):
         """Filter the queryset to either include or exclude orders which are overdue."""
         if str2bool(value):
             return queryset.filter(Build.OVERDUE_FILTER)
-        else:
-            return queryset.exclude(Build.OVERDUE_FILTER)
+        return queryset.exclude(Build.OVERDUE_FILTER)
 
     assigned_to_me = rest_filters.BooleanFilter(label='assigned_to_me', method='filter_assigned_to_me')
 
@@ -68,8 +67,7 @@ class BuildFilter(rest_filters.FilterSet):
 
         if value:
             return queryset.filter(responsible__in=owners)
-        else:
-            return queryset.exclude(responsible__in=owners)
+        return queryset.exclude(responsible__in=owners)
 
     assigned_to = rest_filters.NumberFilter(label='responsible', method='filter_responsible')
 
@@ -99,11 +97,9 @@ class BuildFilter(rest_filters.FilterSet):
 
     def filter_has_project_code(self, queryset, name, value):
         """Filter by whether or not the order has a project code"""
-
         if str2bool(value):
             return queryset.exclude(project_code=None)
-        else:
-            return queryset.filter(project_code=None)
+        return queryset.filter(project_code=None)
 
 
 class BuildList(APIDownloadMixin, ListCreateAPI):
@@ -234,7 +230,6 @@ class BuildDetail(RetrieveUpdateDestroyAPI):
 
     def destroy(self, request, *args, **kwargs):
         """Only allow deletion of a BuildOrder if the build status is CANCELLED"""
-
         build = self.get_object()
 
         if build.status != BuildStatus.CANCELLED:
@@ -291,11 +286,9 @@ class BuildLineFilter(rest_filters.FilterSet):
 
     def filter_allocated(self, queryset, name, value):
         """Filter by whether each BuildLine is fully allocated"""
-
         if str2bool(value):
             return queryset.filter(allocated__gte=F('quantity'))
-        else:
-            return queryset.filter(allocated__lt=F('quantity'))
+        return queryset.filter(allocated__lt=F('quantity'))
 
     available = rest_filters.BooleanFilter(label=_('Available'), method='filter_available')
 
@@ -308,13 +301,11 @@ class BuildLineFilter(rest_filters.FilterSet):
         - The quantity available for each BuildLine
         - The quantity allocated for each BuildLine
         """
-
         flt = Q(quantity__lte=F('total_available_stock') + F('allocated'))
 
         if str2bool(value):
             return queryset.filter(flt)
-        else:
-            return queryset.exclude(flt)
+        return queryset.exclude(flt)
 
 
 class BuildLineEndpoint:
@@ -511,8 +502,7 @@ class BuildItemFilter(rest_filters.FilterSet):
         """Filter the queryset based on whether build items are tracked"""
         if str2bool(value):
             return queryset.exclude(install_into=None)
-        else:
-            return queryset.filter(install_into=None)
+        return queryset.filter(install_into=None)
 
 
 class BuildItemList(ListCreateAPI):
@@ -582,10 +572,6 @@ class BuildAttachmentList(AttachmentMixin, ListCreateDestroyAPIView):
     queryset = BuildOrderAttachment.objects.all()
     serializer_class = build.serializers.BuildAttachmentSerializer
 
-    filter_backends = [
-        DjangoFilterBackend,
-    ]
-
     filterset_fields = [
         'build',
     ]
@@ -601,44 +587,44 @@ class BuildAttachmentDetail(AttachmentMixin, RetrieveUpdateDestroyAPI):
 build_api_urls = [
 
     # Attachments
-    re_path(r'^attachment/', include([
-        path(r'<int:pk>/', BuildAttachmentDetail.as_view(), name='api-build-attachment-detail'),
-        re_path(r'^.*$', BuildAttachmentList.as_view(), name='api-build-attachment-list'),
+    path('attachment/', include([
+        path('<int:pk>/', BuildAttachmentDetail.as_view(), name='api-build-attachment-detail'),
+        path('', BuildAttachmentList.as_view(), name='api-build-attachment-list'),
     ])),
 
     # Build lines
-    re_path(r'^line/', include([
-        path(r'<int:pk>/', BuildLineDetail.as_view(), name='api-build-line-detail'),
-        re_path(r'^.*$', BuildLineList.as_view(), name='api-build-line-list'),
+    path('line/', include([
+        path('<int:pk>/', BuildLineDetail.as_view(), name='api-build-line-detail'),
+        path('', BuildLineList.as_view(), name='api-build-line-list'),
     ])),
 
     # Build Items
-    re_path(r'^item/', include([
-        path(r'<int:pk>/', include([
-            re_path(r'^metadata/', MetadataView.as_view(), {'model': BuildItem}, name='api-build-item-metadata'),
-            re_path(r'^.*$', BuildItemDetail.as_view(), name='api-build-item-detail'),
+    path('item/', include([
+        path('<int:pk>/', include([
+            path('metadata/', MetadataView.as_view(), {'model': BuildItem}, name='api-build-item-metadata'),
+            path('', BuildItemDetail.as_view(), name='api-build-item-detail'),
         ])),
-        re_path(r'^.*$', BuildItemList.as_view(), name='api-build-item-list'),
+        path('', BuildItemList.as_view(), name='api-build-item-list'),
     ])),
 
     # Build Detail
-    path(r'<int:pk>/', include([
-        re_path(r'^allocate/', BuildAllocate.as_view(), name='api-build-allocate'),
-        re_path(r'^auto-allocate/', BuildAutoAllocate.as_view(), name='api-build-auto-allocate'),
-        re_path(r'^complete/', BuildOutputComplete.as_view(), name='api-build-output-complete'),
-        re_path(r'^create-output/', BuildOutputCreate.as_view(), name='api-build-output-create'),
-        re_path(r'^delete-outputs/', BuildOutputDelete.as_view(), name='api-build-output-delete'),
-        re_path(r'^scrap-outputs/', BuildOutputScrap.as_view(), name='api-build-output-scrap'),
-        re_path(r'^finish/', BuildFinish.as_view(), name='api-build-finish'),
-        re_path(r'^cancel/', BuildCancel.as_view(), name='api-build-cancel'),
-        re_path(r'^unallocate/', BuildUnallocate.as_view(), name='api-build-unallocate'),
-        re_path(r'^metadata/', MetadataView.as_view(), {'model': Build}, name='api-build-metadata'),
-        re_path(r'^.*$', BuildDetail.as_view(), name='api-build-detail'),
+    path('<int:pk>/', include([
+        path('allocate/', BuildAllocate.as_view(), name='api-build-allocate'),
+        path('auto-allocate/', BuildAutoAllocate.as_view(), name='api-build-auto-allocate'),
+        path('complete/', BuildOutputComplete.as_view(), name='api-build-output-complete'),
+        path('create-output/', BuildOutputCreate.as_view(), name='api-build-output-create'),
+        path('delete-outputs/', BuildOutputDelete.as_view(), name='api-build-output-delete'),
+        path('scrap-outputs/', BuildOutputScrap.as_view(), name='api-build-output-scrap'),
+        path('finish/', BuildFinish.as_view(), name='api-build-finish'),
+        path('cancel/', BuildCancel.as_view(), name='api-build-cancel'),
+        path('unallocate/', BuildUnallocate.as_view(), name='api-build-unallocate'),
+        path('metadata/', MetadataView.as_view(), {'model': Build}, name='api-build-metadata'),
+        path('', BuildDetail.as_view(), name='api-build-detail'),
     ])),
 
     # Build order status code information
-    re_path(r'status/', StatusView.as_view(), {StatusView.MODEL_REF: BuildStatus}, name='api-build-status-codes'),
+    path('status/', StatusView.as_view(), {StatusView.MODEL_REF: BuildStatus}, name='api-build-status-codes'),
 
     # Build List
-    re_path(r'^.*$', BuildList.as_view(), name='api-build-list'),
+    path('', BuildList.as_view(), name='api-build-list'),
 ]

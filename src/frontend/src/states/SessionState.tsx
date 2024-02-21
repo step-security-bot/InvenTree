@@ -1,25 +1,37 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { createJSONStorage, persist } from 'zustand/middleware';
 
 import { setApiDefaults } from '../App';
+import { fetchGlobalStates } from './states';
 
 interface SessionStateProps {
-  token: string | undefined;
-  setToken: (newToken: string | undefined) => void;
+  token?: string;
+  setToken: (newToken?: string) => void;
+  clearToken: () => void;
+  hasToken: () => boolean;
 }
 
+/*
+ * State manager for user login information.
+ */
 export const useSessionState = create<SessionStateProps>()(
   persist(
-    (set) => ({
-      token: '',
+    (set, get) => ({
+      token: undefined,
+      clearToken: () => {
+        set({ token: undefined });
+      },
       setToken: (newToken) => {
         set({ token: newToken });
+
         setApiDefaults();
-      }
+        fetchGlobalStates();
+      },
+      hasToken: () => !!get().token
     }),
     {
       name: 'session-state',
-      getStorage: () => sessionStorage
+      storage: createJSONStorage(() => sessionStorage)
     }
   )
 );

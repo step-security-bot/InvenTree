@@ -17,7 +17,6 @@ import InvenTree.conversion
 
 def validate_physical_units(unit):
     """Ensure that a given unit is a valid physical unit."""
-
     unit = unit.strip()
 
     # Ignore blank units
@@ -61,15 +60,29 @@ def allowable_url_schemes():
 
 class AllowedURLValidator(validators.URLValidator):
     """Custom URL validator to allow for custom schemes."""
+
     def __call__(self, value):
         """Validate the URL."""
+        import common.models
+
         self.schemes = allowable_url_schemes()
+
+        # Determine if 'strict' URL validation is required (i.e. if the URL must have a schema prefix)
+        strict_urls = common.models.InvenTreeSetting.get_setting(
+            'INVENTREE_STRICT_URLS', True, cache=False
+        )
+
+        if not strict_urls:
+            # Allow URLs which do not have a provided schema
+            if '://' not in value:
+                # Validate as if it were http
+                value = 'http://' + value
+
         super().__call__(value)
 
 
 def validate_purchase_order_reference(value):
     """Validate the 'reference' field of a PurchaseOrder."""
-
     from order.models import PurchaseOrder
 
     # If we get to here, run the "default" validation routine
@@ -78,7 +91,6 @@ def validate_purchase_order_reference(value):
 
 def validate_sales_order_reference(value):
     """Validate the 'reference' field of a SalesOrder."""
-
     from order.models import SalesOrder
 
     # If we get to here, run the "default" validation routine
@@ -106,7 +118,7 @@ def validate_overage(value):
         i = Decimal(value)
 
         if i < 0:
-            raise ValidationError(_("Overage value must not be negative"))
+            raise ValidationError(_('Overage value must not be negative'))
 
         # Looks like a number
         return True
@@ -122,17 +134,15 @@ def validate_overage(value):
             f = float(v)
 
             if f < 0:
-                raise ValidationError(_("Overage value must not be negative"))
+                raise ValidationError(_('Overage value must not be negative'))
             elif f > 100:
-                raise ValidationError(_("Overage must not exceed 100%"))
+                raise ValidationError(_('Overage must not exceed 100%'))
 
             return True
         except ValueError:
             pass
 
-    raise ValidationError(
-        _("Invalid value for overage")
-    )
+    raise ValidationError(_('Invalid value for overage'))
 
 
 def validate_part_name_format(value):
@@ -140,7 +150,6 @@ def validate_part_name_format(value):
 
     Make sure that each template container has a field of Part Model
     """
-
     # Make sure that the field_name exists in Part model
     from part.models import Part
 
@@ -169,8 +178,6 @@ def validate_part_name_format(value):
     try:
         Template(value).render({'part': p})
     except Exception as exc:
-        raise ValidationError({
-            'value': str(exc)
-        })
+        raise ValidationError({'value': str(exc)})
 
     return True

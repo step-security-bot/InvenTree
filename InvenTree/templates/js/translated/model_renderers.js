@@ -24,6 +24,7 @@
     renderReturnOrder,
     renderStockItem,
     renderStockLocation,
+    renderStockLocationType,
     renderSupplierPart,
     renderUser,
 */
@@ -59,12 +60,16 @@ function getModelRenderer(model) {
         return renderStockItem;
     case 'stocklocation':
         return renderStockLocation;
+    case 'stocklocationtype':
+        return renderStockLocationType;
     case 'part':
         return renderPart;
     case 'partcategory':
         return renderPartCategory;
     case 'partparametertemplate':
         return renderPartParameterTemplate;
+    case 'parttesttemplate':
+        return renderPartTestTemplate;
     case 'purchaseorder':
         return renderPurchaseOrder;
     case 'salesorder':
@@ -254,6 +259,16 @@ function renderStockLocation(data, parameters={}) {
             text: `${level}${data.pathstring}`,
             textSecondary: render_description ? shortenString(data.description) : '',
             url: data.url || `/stock/location/${data.pk}/`,
+        },
+        parameters
+    );
+}
+
+// Renderer for "StockLocationType" model
+function renderStockLocationType(data, parameters={}) {
+    return renderModel(
+        {
+            text: `<span class="${data.icon} me-1"></span>${data.name}`,
         },
         parameters
     );
@@ -464,6 +479,18 @@ function renderPartParameterTemplate(data, parameters={}) {
     return renderModel(
         {
             text: `${data.name}${units}`,
+        },
+        parameters
+    );
+}
+
+
+function renderPartTestTemplate(data, parameters={}) {
+
+    return renderModel(
+        {
+            text: data.test_name,
+            textSecondary: data.description,
         },
         parameters
     );

@@ -29,10 +29,9 @@ src="{% static 'img/blank_image.png' %}"
 
 {% block actions %}
 <!-- Admin Display -->
-{% if user.is_staff and roles.build.change %}
-{% url 'admin:build_build_change' build.pk as url %}
+{% admin_url user "build.build" build.pk as url %}
 {% include "admin_button.html" with url=url %}
-{% endif %}
+
 {% if barcodes %}
 <!-- Barcode actions menu -->
 <div class='btn-group' role='group'>
@@ -271,7 +270,7 @@ src="{% static 'img/blank_image.png' %}"
             '{% url "api-build-detail" build.pk %}',
             {
                 method: 'DELETE',
-                title: '{% trans "Delete Build Order" %}',
+                title: '{% trans "Delete Build Order" escape %}',
                 redirect: "{% url 'build-index' %}",
             }
         );
@@ -281,7 +280,7 @@ src="{% static 'img/blank_image.png' %}"
     <!-- Barcode functionality callbacks -->
     $('#show-qr-code').click(function() {
         showQRDialog(
-            '{% trans "Build Order QR Code" %}',
+            '{% trans "Build Order QR Code" escape %}',
             '{"build": {{ build.pk }} }'
         );
     });
@@ -293,7 +292,7 @@ src="{% static 'img/blank_image.png' %}"
                 build: {{ build.pk }},
             },
             {
-                title: '{% trans "Link Barcode to Build Order" %}',
+                title: '{% trans "Link Barcode to Build Order" escape %}',
             }
         );
     });
