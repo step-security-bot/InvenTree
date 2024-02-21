@@ -7,6 +7,7 @@ from import_export import widgets
 from import_export.admin import ImportExportModelAdmin
 from import_export.fields import Field
 
+import stock.models
 from InvenTree.admin import InvenTreeResource
 from order import models
 
@@ -173,6 +174,11 @@ class PurchaseOrderLineItemResource(PriceResourceMixin, InvenTreeResource):
 
     SKU = Field(attribute='part__SKU', readonly=True)
 
+    destination = Field(
+        attribute='destination',
+        widget=widgets.ForeignKeyWidget(stock.models.StockLocation),
+    )
+
     def dehydrate_purchase_price(self, line):
         """Return a string value of the 'purchase_price' field, rather than the 'Money' object."""
         if line.purchase_price:
@@ -214,7 +220,7 @@ class SalesOrderLineItemResource(PriceResourceMixin, InvenTreeResource):
         Ref: https://github.com/inventree/InvenTree/issues/2207
         """
         if item.sale_price:
-            return str(item.sale_price)
+            return item.sale_price.amount
         return ''
 
 

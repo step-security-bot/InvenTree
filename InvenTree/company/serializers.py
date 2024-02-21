@@ -309,6 +309,7 @@ class SupplierPartSerializer(InvenTreeTagModelSerializer):
             'manufacturer_part',
             'manufacturer_part_detail',
             'MPN',
+            'name',
             'note',
             'pk',
             'barcode_hash',
@@ -326,13 +327,18 @@ class SupplierPartSerializer(InvenTreeTagModelSerializer):
             'tags',
         ]
 
-        read_only_fields = ['availability_updated', 'barcode_hash']
+        read_only_fields = [
+            'availability_updated',
+            'barcode_hash',
+            'pack_quantity_native',
+        ]
 
     tags = TagListSerializerField(required=False)
 
     def __init__(self, *args, **kwargs):
         """Initialize this serializer with extra detail fields as required."""
         # Check if 'available' quantity was supplied
+
         self.has_available_quantity = 'available' in kwargs.get('data', {})
 
         brief = kwargs.pop('brief', False)
@@ -364,6 +370,8 @@ class SupplierPartSerializer(InvenTreeTagModelSerializer):
     in_stock = serializers.FloatField(read_only=True)
     available = serializers.FloatField(required=False)
 
+    pack_quantity_native = serializers.FloatField(read_only=True)
+
     part_detail = PartBriefSerializer(source='part', many=False, read_only=True)
 
     supplier_detail = CompanyBriefSerializer(
@@ -387,6 +395,8 @@ class SupplierPartSerializer(InvenTreeTagModelSerializer):
     manufacturer_part_detail = ManufacturerPartSerializer(
         source='manufacturer_part', part_detail=False, read_only=True
     )
+
+    name = serializers.CharField(read_only=True)
 
     url = serializers.CharField(source='get_absolute_url', read_only=True)
 

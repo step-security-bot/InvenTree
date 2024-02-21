@@ -12,20 +12,12 @@ from django.conf import settings
 from django.core.exceptions import AppRegistryNotReady
 from django.db.utils import IntegrityError, OperationalError, ProgrammingError
 
+from maintenance_mode.core import maintenance_mode_on, set_maintenance_mode
+
+import InvenTree.helpers
 import InvenTree.ready
 
 logger = logging.getLogger('inventree')
-
-
-def hashFile(filename):
-    """Calculate the MD5 hash of a file."""
-    md5 = hashlib.md5()
-
-    with open(filename, 'rb') as f:
-        data = f.read()
-        md5.update(data)
-
-    return md5.hexdigest()
 
 
 class LabelConfig(AppConfig):
@@ -42,13 +34,10 @@ class LabelConfig(AppConfig):
         ):
             return
 
-        if InvenTree.ready.isRunningMigrations():
-            return
+        if not InvenTree.ready.canAppAccessDatabase(allow_test=False):
+            return  # pragma: no cover
 
-        if (
-            InvenTree.ready.canAppAccessDatabase(allow_test=False)
-            and not InvenTree.ready.isImportingData()
-        ):
+        with maintenance_mode_on():
             try:
                 self.create_labels()  # pragma: no cover
             except (
@@ -61,6 +50,8 @@ class LabelConfig(AppConfig):
                 warnings.warn(
                     'Database was not ready for creating labels', stacklevel=2
                 )
+
+        set_maintenance_mode(False)
 
     def create_labels(self):
         """Create all default templates."""
@@ -167,7 +158,9 @@ class LabelConfig(AppConfig):
         if dst_file.exists():
             # File already exists - let's see if it is the "same"
 
-            if hashFile(dst_file) != hashFile(src_file):  # pragma: no cover
+            if InvenTree.helpers.hash_file(dst_file) != InvenTree.helpers.hash_file(
+                src_file
+            ):  # pragma: no cover
                 logger.info("Hash differs for '%s'", filename)
                 to_copy = True
 

@@ -11,6 +11,10 @@ from django.conf import settings
 from django.core.exceptions import AppRegistryNotReady
 from django.db.utils import IntegrityError, OperationalError, ProgrammingError
 
+from maintenance_mode.core import maintenance_mode_on, set_maintenance_mode
+
+import InvenTree.helpers
+
 logger = logging.getLogger('inventree')
 
 
@@ -30,36 +34,36 @@ class ReportConfig(AppConfig):
         ):
             return
 
-        if InvenTree.ready.isRunningMigrations():
-            return
+        if not InvenTree.ready.canAppAccessDatabase(allow_test=False):
+            return  # pragma: no cover
 
         # Configure logging for PDF generation (disable "info" messages)
         logging.getLogger('fontTools').setLevel(logging.WARNING)
         logging.getLogger('weasyprint').setLevel(logging.WARNING)
 
-        # Create entries for default report templates
-        if (
-            InvenTree.ready.canAppAccessDatabase(allow_test=False)
-            and not InvenTree.ready.isImportingData()
+        with maintenance_mode_on():
+            self.create_reports()
+
+        set_maintenance_mode(False)
+
+    def create_reports(self):
+        """Create default report templates."""
+        try:
+            self.create_default_test_reports()
+            self.create_default_build_reports()
+            self.create_default_bill_of_materials_reports()
+            self.create_default_purchase_order_reports()
+            self.create_default_sales_order_reports()
+            self.create_default_return_order_reports()
+            self.create_default_stock_location_reports()
+        except (
+            AppRegistryNotReady,
+            IntegrityError,
+            OperationalError,
+            ProgrammingError,
         ):
-            try:
-                self.create_default_test_reports()
-                self.create_default_build_reports()
-                self.create_default_bill_of_materials_reports()
-                self.create_default_purchase_order_reports()
-                self.create_default_sales_order_reports()
-                self.create_default_return_order_reports()
-                self.create_default_stock_location_reports()
-            except (
-                AppRegistryNotReady,
-                IntegrityError,
-                OperationalError,
-                ProgrammingError,
-            ):
-                # Database might not yet be ready
-                warnings.warn(
-                    'Database was not ready for creating reports', stacklevel=2
-                )
+            # Database might not yet be ready
+            warnings.warn('Database was not ready for creating reports', stacklevel=2)
 
     def create_default_reports(self, model, reports):
         """Copy default report files across to the media directory."""
@@ -83,7 +87,21 @@ class ReportConfig(AppConfig):
             src_file = src_dir.joinpath(report['file'])
             dst_file = settings.MEDIA_ROOT.joinpath(filename)
 
+            do_copy = False
+
             if not dst_file.exists():
+                logger.info("Report template '%s' is not present", filename)
+                do_copy = True
+            else:
+                # Check if the file contents are different
+                src_hash = InvenTree.helpers.hash_file(src_file)
+                dst_hash = InvenTree.helpers.hash_file(dst_file)
+
+                if src_hash != dst_hash:
+                    logger.info("Hash differs for '%s'", filename)
+                    do_copy = True
+
+            if do_copy:
                 logger.info("Copying test report template '%s'", dst_file)
                 shutil.copyfile(src_file, dst_file)
 

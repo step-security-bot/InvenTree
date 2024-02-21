@@ -3,7 +3,7 @@
 import logging
 
 from django.db.models import F
-from django.urls import path, re_path
+from django.urls import path
 from django.utils.translation import gettext_lazy as _
 
 from rest_framework import permissions
@@ -144,15 +144,15 @@ class BarcodeAssign(BarcodeView):
         Checks inputs and assign barcode (hash) to StockItem.
         """
         # Here we only check against 'InvenTree' plugins
-        plugins = registry.with_mixin('barcode', builtin=True)
+        inventree_barcode_plugin = registry.get_plugin('inventreebarcode')
 
         # First check if the provided barcode matches an existing database entry
-        for plugin in plugins:
-            result = plugin.scan(barcode)
+        if inventree_barcode_plugin:
+            result = inventree_barcode_plugin.scan(barcode)
 
             if result is not None:
                 result['error'] = _('Barcode matches existing item')
-                result['plugin'] = plugin.name
+                result['plugin'] = inventree_barcode_plugin.name
                 result['barcode_data'] = barcode
 
                 raise ValidationError(result)
@@ -578,5 +578,5 @@ barcode_api_urls = [
     # Allocate stock to a sales order by scanning barcode
     path('so-allocate/', BarcodeSOAllocate.as_view(), name='api-barcode-so-allocate'),
     # Catch-all performs barcode 'scan'
-    re_path(r'^.*$', BarcodeScan.as_view(), name='api-barcode-scan'),
+    path('', BarcodeScan.as_view(), name='api-barcode-scan'),
 ]
