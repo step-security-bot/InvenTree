@@ -291,7 +291,6 @@ def remove_mfa(c, mail=''):
 @task(help={'frontend': 'Build the frontend'})
 def static(c, frontend=False):
     """Copies required static files to the STATIC_ROOT directory, as per Django requirements."""
-    manage(c, 'prerender')
     if frontend and node_available():
         frontend_build(c)
 
