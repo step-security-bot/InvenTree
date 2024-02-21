@@ -299,24 +299,7 @@ def static(c, frontend=False):
     manage(c, 'collectstatic --no-input --clear')
 
 
-@task
-def translate_stats(c):
-    """Collect translation stats.
-
-    The file generated from this is needed for the UI.
-    """
-    # Recompile the translation files (.mo)
-    # We do not run 'invoke translate' here, as that will touch the source (.po) files too!
-    try:
-        manage(c, 'compilemessages', pty=True)
-    except Exception:
-        print('WARNING: Translation files could not be compiled:')
-
-    path = Path('InvenTree', 'script', 'translation_stats.py')
-    c.run(f'python3 {path}')
-
-
-@task(post=[translate_stats])
+@task()
 def translate(c, ignore_static=False, no_frontend=False):
     """Rebuild translation source files. Advanced use only!
 
