@@ -1,11 +1,9 @@
 """Tests for basic notification methods and functions in InvenTree."""
 
-import plugin.templatetags.plugin_extras as plugin_tags
 from common.notifications import (
     BulkNotificationMethod,
     NotificationMethod,
     SingleNotificationMethod,
-    storage,
 )
 from part.test_part import BaseNotificationIntegrationTest
 from plugin.models import NotificationUserSetting
