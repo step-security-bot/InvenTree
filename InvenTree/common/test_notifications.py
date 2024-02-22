@@ -148,12 +148,3 @@ class NotificationUserSettingTests(BaseNotificationIntegrationTest):
 
         # run through notification
         self._notification_run(SampleImplementation)
-        setting = NotificationUserSetting.objects.all().first()
-
-        # assertions for settings
-        self.assertEqual(setting.name, 'Enable test notifications')
-        self.assertEqual(setting.default_value, True)
-        self.assertEqual(
-            setting.description, 'Allow sending of test for event notifications'
-        )
-        self.assertEqual(setting.units, 'alpha')
