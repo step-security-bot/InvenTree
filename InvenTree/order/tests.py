@@ -1,9 +1,10 @@
-"""Various unit tests for order models"""
+"""Various unit tests for order models."""
 
 from datetime import datetime, timedelta
 from decimal import Decimal
 
 import django.core.exceptions as django_exceptions
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.test import TestCase
@@ -18,8 +19,7 @@ from part.models import Part
 from stock.models import StockItem, StockLocation
 from users.models import Owner
 
-from .models import (PurchaseOrder, PurchaseOrderExtraLine,
-                     PurchaseOrderLineItem)
+from .models import PurchaseOrder, PurchaseOrderExtraLine, PurchaseOrderLineItem
 
 
 class OrderTest(TestCase):
@@ -40,18 +40,20 @@ class OrderTest(TestCase):
     def test_basics(self):
         """Basic tests e.g. repr functions etc."""
         for pk in range(1, 8):
-
             order = PurchaseOrder.objects.get(pk=pk)
 
-            self.assertEqual(order.get_absolute_url(), f'/order/purchase-order/{pk}/')
+            if settings.ENABLE_CLASSIC_FRONTEND:
+                self.assertEqual(
+                    order.get_absolute_url(), f'/order/purchase-order/{pk}/'
+                )
 
             self.assertEqual(order.reference, f'PO-{pk:04d}')
 
         line = PurchaseOrderLineItem.objects.get(pk=1)
-        self.assertEqual(str(line), "100 x ACME0001 from ACME (for PO-0001 - ACME)")
+        self.assertEqual(str(line), '100 x ACME0001 from ACME (for PO-0001 - ACME)')
 
     def test_rebuild_reference(self):
-        """Test that the reference_int field is correctly updated when the model is saved"""
+        """Test that the reference_int field is correctly updated when the model is saved."""
         order = PurchaseOrder.objects.get(pk=1)
         order.save()
         self.assertEqual(order.reference_int, 1)
@@ -216,24 +218,18 @@ class OrderTest(TestCase):
         self.assertEqual(order.status, PurchaseOrderStatus.COMPLETE)
 
     def test_receive_pack_size(self):
-        """Test receiving orders from suppliers with different pack_size values"""
+        """Test receiving orders from suppliers with different pack_size values."""
         prt = Part.objects.get(pk=1)
         sup = Company.objects.get(pk=1)
 
         # Create a new supplier part with larger pack size
         sp_1 = SupplierPart.objects.create(
-            part=prt,
-            supplier=sup,
-            SKU='SKUx10',
-            pack_quantity='10',
+            part=prt, supplier=sup, SKU='SKUx10', pack_quantity='10'
         )
 
         # Create a new supplier part with smaller pack size
         sp_2 = SupplierPart.objects.create(
-            part=prt,
-            supplier=sup,
-            SKU='SKUx0.1',
-            pack_quantity='0.1',
+            part=prt, supplier=sup, SKU='SKUx0.1', pack_quantity='0.1'
         )
 
         # Record values before we start
@@ -244,9 +240,7 @@ class OrderTest(TestCase):
 
         # Create a new PurchaseOrder
         po = PurchaseOrder.objects.create(
-            supplier=sup,
-            reference=f"PO-{n + 1}",
-            description='Some PO',
+            supplier=sup, reference=f'PO-{n + 1}', description='Some PO'
         )
 
         # Add line items
@@ -291,15 +285,11 @@ class OrderTest(TestCase):
 
         # The 'on_order' quantity should have decreased by 10.5
         self.assertEqual(
-            prt.on_order,
-            round(on_order + Decimal(31.3) - Decimal(10.5), 1)
+            prt.on_order, round(on_order + Decimal(31.3) - Decimal(10.5), 1)
         )
 
         # The 'in_stock' quantity should have increased by 10.5
-        self.assertEqual(
-            prt.total_stock,
-            round(in_stock + Decimal(10.5), 1)
-        )
+        self.assertEqual(prt.total_stock, round(in_stock + Decimal(10.5), 1))
 
         # Check that the unit purchase price value has been updated correctly
         si = StockItem.objects.filter(supplier_part=sp_1)
@@ -319,7 +309,7 @@ class OrderTest(TestCase):
         self.assertEqual(si.purchase_price, Money(100, 'USD'))
 
     def test_overdue_notification(self):
-        """Test overdue purchase order notification
+        """Test overdue purchase order notification.
 
         Ensure that a notification is sent when a PurchaseOrder becomes overdue
         """
@@ -341,8 +331,7 @@ class OrderTest(TestCase):
 
         for user_id in [2, 3, 4]:
             messages = common.models.NotificationMessage.objects.filter(
-                category='order.overdue_purchase_order',
-                user__id=user_id,
+                category='order.overdue_purchase_order', user__id=user_id
             )
 
             # User ID 3 is inactive, and thus should not receive notifications
@@ -358,7 +347,7 @@ class OrderTest(TestCase):
             self.assertEqual(msg.name, 'Overdue Purchase Order')
 
     def test_new_po_notification(self):
-        """Test that a notification is sent when a new PurchaseOrder is created
+        """Test that a notification is sent when a new PurchaseOrder is created.
 
         - The responsible user(s) should receive a notification
         - The creating user should *not* receive a notification
@@ -373,7 +362,7 @@ class OrderTest(TestCase):
         # Initially, no notifications
 
         messages = common.models.NotificationMessage.objects.filter(
-            category='order.new_purchaseorder',
+            category='order.new_purchaseorder'
         )
 
         self.assertEqual(messages.count(), 0)

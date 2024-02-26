@@ -2,6 +2,7 @@
 
 from django.conf import settings
 from django.http import Http404
+from django.test import tag
 from django.urls import reverse
 
 from error_report.models import Error
@@ -10,12 +11,16 @@ from InvenTree.exceptions import log_error
 from InvenTree.unit_test import InvenTreeTestCase
 
 
+# TODO change test to not rely on CUI
+@tag('cui')
 class MiddlewareTests(InvenTreeTestCase):
     """Test for middleware functions."""
 
     def check_path(self, url, code=200, **kwargs):
         """Helper function to run a request."""
-        response = self.client.get(url, HTTP_ACCEPT='application/json', **kwargs)
+        response = self.client.get(
+            url, headers={'accept': 'application/json'}, **kwargs
+        )
         self.assertEqual(response.status_code, code)
         return response
 
@@ -66,6 +71,7 @@ class MiddlewareTests(InvenTreeTestCase):
 
     def test_error_exceptions(self):
         """Test that ignored errors are not logged."""
+
         def check(excpected_nbr=0):
             # Check that errors are empty
             errors = Error.objects.all()

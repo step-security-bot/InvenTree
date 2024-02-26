@@ -11,7 +11,7 @@ logger = logging.getLogger('inventree')
 
 
 def currency_code_default():
-    """Returns the default currency code (or USD if not specified)"""
+    """Returns the default currency code (or USD if not specified)."""
     from common.models import InvenTreeSetting
 
     cached_value = cache.get('currency_code_default', '')
@@ -20,7 +20,9 @@ def currency_code_default():
         return cached_value
 
     try:
-        code = InvenTreeSetting.get_setting('INVENTREE_DEFAULT_CURRENCY', backup_value='', create=True, cache=True)
+        code = InvenTreeSetting.get_setting(
+            'INVENTREE_DEFAULT_CURRENCY', backup_value='', create=True, cache=True
+        )
     except Exception:  # pragma: no cover
         # Database may not yet be ready, no need to throw an error here
         code = ''
@@ -54,3 +56,12 @@ def stock_expiry_enabled():
     from common.models import InvenTreeSetting
 
     return InvenTreeSetting.get_setting('STOCK_ENABLE_EXPIRY', False, create=False)
+
+
+def prevent_build_output_complete_on_incompleted_tests():
+    """Returns True if the completion of the build outputs is disabled until the required tests are passed."""
+    from common.models import InvenTreeSetting
+
+    return InvenTreeSetting.get_setting(
+        'PREVENT_BUILD_COMPLETION_HAVING_INCOMPLETED_TESTS', False, create=False
+    )
