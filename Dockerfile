@@ -48,8 +48,6 @@ ENV INVENTREE_BACKGROUND_WORKERS="4"
 ENV INVENTREE_WEB_ADDR=0.0.0.0
 ENV INVENTREE_WEB_PORT=8000
 
-ENV VIRTUAL_ENV=/usr/local
-
 LABEL org.label-schema.schema-version="1.0" \
       org.label-schema.build-date=${DATE} \
       org.label-schema.vendor="inventree" \
@@ -96,7 +94,7 @@ FROM inventree_base as prebuild
 
 ENV PATH=/root/.local/bin:$PATH
 RUN ./install_build_packages.sh --no-cache --virtual .build-deps && \
-    pip install --user uv --no-cache-dir && pip install -r base_requirements.txt -r requirements.txt --no-cache && \
+    pip install --user uv --no-cache-dir && pip uv install -r base_requirements.txt -r requirements.txt --no-cache --system && \
     apk --purge del .build-deps
 
 # Frontend builder image:
@@ -141,7 +139,7 @@ EXPOSE 5173
 # Install packages required for building python packages
 RUN ./install_build_packages.sh
 
-RUN pip install uv --no-cache-dir && pip install -r base_requirements.txt --no-cache
+RUN pip install uv --no-cache-dir && uv pip install -r base_requirements.txt --no-cache --system
 
 # Install nodejs / npm / yarn
 
