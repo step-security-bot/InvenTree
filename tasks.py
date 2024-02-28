@@ -220,8 +220,8 @@ def plugins(c, uv=False):
     if not uv:
         c.run(f"pip3 install --disable-pip-version-check -U -r '{plugin_file}'")
     else:
-        c.run('pip3 install --no-cache-dir --disable-pip-version-check uv')
-        c.run(f"uv pip install -r '{plugin_file}'")
+        c.run('pip3 install --no-cache-dir --disable-pip-version-check --upgrade uv')
+        c.run(f"uv pip install -r '{plugin_file}' --system")
 
 
 @task(help={'uv': 'Use UV package manager (experimental)'})
@@ -238,8 +238,8 @@ def install(c, uv=False):
         )
     else:
         c.run('pip3 install --upgrade uv')
-        c.run('uv pip install --upgrade setuptools')
-        c.run('uv pip install -U -r requirements.txt')
+        c.run('uv pip install --upgrade setuptools --system')
+        c.run('uv pip install -U -r requirements.txt --system')
 
     # Run plugins install
     plugins(c, uv=uv)
