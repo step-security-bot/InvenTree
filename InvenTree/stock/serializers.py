@@ -858,7 +858,14 @@ class LocationTreeSerializer(InvenTree.serializers.InvenTreeModelSerializer):
         """Metaclass options."""
 
         model = StockLocation
-        fields = ['pk', 'name', 'parent', 'icon', 'structural']
+        fields = ['pk', 'name', 'parent', 'icon', 'structural', 'sublocations']
+
+    sublocations = serializers.IntegerField(label=_('Sublocations'), read_only=True)
+
+    @staticmethod
+    def annotate_queryset(queryset):
+        """Annotate the queryset with the number of sublocations."""
+        return queryset.annotate(sublocations=stock.filters.annotate_sub_locations())
 
 
 class LocationSerializer(InvenTree.serializers.InvenTreeTagModelSerializer):
@@ -879,6 +886,7 @@ class LocationSerializer(InvenTree.serializers.InvenTreeTagModelSerializer):
             'pathstring',
             'path',
             'items',
+            'sublocations',
             'owner',
             'icon',
             'custom_icon',
@@ -904,13 +912,18 @@ class LocationSerializer(InvenTree.serializers.InvenTreeTagModelSerializer):
     def annotate_queryset(queryset):
         """Annotate extra information to the queryset."""
         # Annotate the number of stock items which exist in this category (including subcategories)
-        queryset = queryset.annotate(items=stock.filters.annotate_location_items())
+        queryset = queryset.annotate(
+            items=stock.filters.annotate_location_items(),
+            sublocations=stock.filters.annotate_sub_locations(),
+        )
 
         return queryset
 
     url = serializers.CharField(source='get_absolute_url', read_only=True)
 
-    items = serializers.IntegerField(read_only=True)
+    items = serializers.IntegerField(read_only=True, label=_('Stock Items'))
+
+    sublocations = serializers.IntegerField(read_only=True, label=_('Sublocations'))
 
     level = serializers.IntegerField(read_only=True)
 
