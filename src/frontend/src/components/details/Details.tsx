@@ -7,6 +7,7 @@ import {
   Group,
   Paper,
   Skeleton,
+  Stack,
   Table,
   Text,
   Tooltip
@@ -22,6 +23,7 @@ import { getDetailUrl } from '../../functions/urls';
 import { apiUrl } from '../../states/ApiState';
 import { useGlobalSettingsState } from '../../states/SettingsState';
 import { ProgressBar } from '../items/ProgressBar';
+import { StylishText } from '../items/StylishText';
 import { YesNoButton } from '../items/YesNoButton';
 import { getModelInfo } from '../render/ModelType';
 import { StatusRenderer } from '../render/StatusRenderer';
@@ -196,7 +198,13 @@ function TableStringValue(props: FieldProps) {
   }
 
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+    <div
+      style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        wordBreak: 'break-word'
+      }}
+    >
       <Suspense fallback={<Skeleton width={200} height={20} radius="xl" />}>
         <span>
           {value ? value : props.field_data?.unit && '0'}{' '}
@@ -385,22 +393,27 @@ export function DetailsTableField({
 
 export function DetailsTable({
   item,
-  fields
+  fields,
+  title
 }: {
   item: any;
   fields: DetailsField[];
+  title?: string;
 }) {
   return (
     <Paper p="xs" withBorder radius="xs">
-      <Table striped>
-        <tbody>
-          {fields
-            .filter((field: DetailsField) => !field.hidden)
-            .map((field: DetailsField, index: number) => (
-              <DetailsTableField field={field} item={item} key={index} />
-            ))}
-        </tbody>
-      </Table>
+      <Stack spacing="xs">
+        {title && <StylishText size="lg">{title}</StylishText>}
+        <Table striped>
+          <tbody>
+            {fields
+              .filter((field: DetailsField) => !field.hidden)
+              .map((field: DetailsField, index: number) => (
+                <DetailsTableField field={field} item={item} key={index} />
+              ))}
+          </tbody>
+        </Table>
+      </Stack>
     </Paper>
   );
 }
