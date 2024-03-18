@@ -195,8 +195,7 @@ class ParameterTests(TestCase):
         # Invalid units also pass, but will be converted to the template units
         for value in bad_values:
             param = PartParameter(part=prt, template=template, data=value)
-            with self.assertRaises(django_exceptions.ValidationError):
-                param.full_clean()
+            param.full_clean()
 
         # Enable enforcing of part parameter units
         InvenTreeSetting.set_setting(
