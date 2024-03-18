@@ -130,8 +130,8 @@ drf-spectacular==0.27.1
 dulwich==0.21.7
 et-xmlfile==1.1.0
     # via openpyxl
-feedparser==6.0.10
-fonttools==4.44.0
+feedparser==6.0.11
+fonttools==4.47.2
     # via weasyprint
 googleapis-common-protos==1.62.0
     # via
