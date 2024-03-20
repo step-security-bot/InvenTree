@@ -10,16 +10,6 @@ updates:
     schedule:
       interval: daily
 
-  - package-ecosystem: npm
-    directory: /InvenTree/InvenTree/static/script/jquery-ui
-    schedule:
-      interval: daily
-
-  - package-ecosystem: npm
-    directory: /InvenTree/InvenTree/static/treegrid
-    schedule:
-      interval: daily
-
   - package-ecosystem: pip
     directory: /docker
     schedule:
