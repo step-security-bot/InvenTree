@@ -9,6 +9,9 @@ on:
   pull_request_target:
     types: ["labeled", "closed"]
 
+permissions:
+  contents: read
+
 jobs:
   backport:
     name: Backport PR
@@ -24,6 +27,11 @@ jobs:
         || (github.event.action == 'closed')
       )
     steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
       - name: Backport Action
         uses: sqren/backport-github-action@ad888e978060bc1b2798690dd9d03c4036560947 # pin@v9.2.2
         with:

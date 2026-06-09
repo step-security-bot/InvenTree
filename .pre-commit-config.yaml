@@ -98,3 +98,15 @@ repos:
     hooks:
     -   id: teyit
         language_version: python3.11
+-   repo: https://github.com/jumanjihouse/pre-commit-hooks
+    rev: 3.0.0
+    hooks:
+    -   id: shellcheck
+-   repo: https://github.com/pre-commit/mirrors-eslint
+    rev: v8.38.0
+    hooks:
+    -   id: eslint
+-   repo: https://github.com/pylint-dev/pylint
+    rev: v2.17.2
+    hooks:
+    -   id: pylint
